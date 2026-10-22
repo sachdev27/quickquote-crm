@@ -1,13 +1,6 @@
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 
+// Login is handled at the edge by Cloudflare Access; server functions re-verify the Access JWT.
 export const Route = createFileRoute("/_authenticated")({
-  ssr: false,
-  beforeLoad: async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) throw redirect({ to: "/auth" });
-  },
   component: () => <Outlet />,
 });

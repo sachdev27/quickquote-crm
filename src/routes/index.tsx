@@ -4,13 +4,13 @@ import { Calculator, Users, Share2 } from "lucide-react";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "PipeQuote — Proforma Quotation Generator & CRM" },
+      { title: "Tarko CRM — Quick Quotes for HDPE Pipe, Sprinklers & Fittings" },
       {
         name: "description",
         content:
           "Create professional proforma quotations for HDPE pipes in under a minute — rate calculation with GST, customer CRM, PDF and WhatsApp sharing.",
       },
-      { property: "og:title", content: "PipeQuote — Proforma Quotation Generator & CRM" },
+      { property: "og:title", content: "Tarko CRM — Quick Quotes for HDPE Pipe, Sprinklers & Fittings" },
       {
         property: "og:description",
         content:
@@ -28,7 +28,7 @@ function Landing() {
     <div className="flex min-h-screen flex-col bg-background">
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 py-12">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-          For HDPE pipe sellers
+          Sakhi Industries
         </p>
         <h1 className="mt-3 text-4xl font-bold leading-tight text-foreground">
           Proforma quotations in <span className="text-primary">under a minute</span>
@@ -41,10 +41,10 @@ function Landing() {
 
         <div className="mt-8 flex flex-col gap-3">
           <Link
-            to="/auth"
+            to="/dashboard"
             className="inline-flex h-12 items-center justify-center rounded-xl bg-primary text-base font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Sign in / Create account
+            Open app
           </Link>
         </div>
 

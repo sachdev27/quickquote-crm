@@ -1,226 +1,159 @@
-import type { Standard } from "./pipe-data";
+export type Category = "pipe" | "sprinkler" | "fitting";
+export type Unit = "m" | "pc" | "kg";
 
-export interface Customer {
-  id: string;
-  name: string;
-  phone: string | null;
-  address: string | null;
-  notes: string | null;
-}
-
-export interface QuoteRow {
-  id: string;
-  quote_no: string;
-  customer_id: string | null;
-  quote_date: string;
-  status: string;
-  gst_rate: number;
-  raw_rate_kg: number;
-  production_cost_kg: number;
-  transport_kg: number;
-  margin_pct: number;
-  extra_charges: number;
-  notes: string | null;
-  customers?: { name: string } | null;
-}
-
-export interface QuoteItemRow {
-  id: string;
-  quote_id: string;
-  standard: string;
-  size: string;
-  dr: string;
-  od_in: number | null;
-  weight_kgm: number | null;
-  length_ft: number;
-  pieces: number;
-  sell_rate_kg: number;
-}
-
-export interface SettingsRow {
-  user_id: string;
-  company_name: string | null;
-  company_address: string | null;
-  company_phone: string | null;
-  company_gstin: string | null;
-  default_raw_rate_kg: number;
-  default_production_kg: number;
-  default_transport_kg: number;
-  default_margin_pct: number;
-  default_gst_rate: number;
-}
-
-export interface Pricing {
-  raw: number;
-  production: number;
-  transport: number;
-  marginPct: number;
-}
-
-export interface DraftItem {
-  key: string;
-  standard: Standard;
-  size: string;
-  dr: string;
-  odIn: number;
-  weightKgm: number;
-  lengthFt: number;
-  pieces: number;
-  rate: number;
-}
-
+export const CATEGORY_LABELS: Record<Category, string> = { pipe: "HDPE Pipe", sprinkler: "Sprinkler", fitting: "Fitting" };
+export const UNIT_LABELS: Record<Unit, string> = { m: "m", pc: "pcs", kg: "kg" };
 export const GST_OPTIONS = [0, 5, 12, 18, 28];
-
-export const FT_TO_M = 0.3048;
-
-export function costPerKg(p: Pricing): number {
-  return p.raw + p.production + p.transport;
+export interface Brand {
+  id: string;
+  code: string;
+  name: string;
+  tagline: string | null;
+  address: string | null;
+  phone: string | null;
+  gstin: string | null;
+  pan: string | null;
+  bank_name: string | null;
+  bank_account: string | null;
+  bank_ifsc: string | null;
+  upi_id: string | null;
+  terms: string | null;
 }
 
-export function sellRatePerKg(p: Pricing): number {
-  return costPerKg(p) * (1 + p.marginPct / 100);
+export const STATUS_LABELS: Record<string, string> = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
+
+// One quote line. unitPrice is in the quote's basis: GST-inclusive or exclusive (see Totals).
+export interface Line {
+  productId: string | null;
+  category: Category;
+  description: string;
+  hsn: string | null;
+  unit: Unit;
+  qty: number;
+  unitPrice: number;
+  gstRate: number;
 }
 
-export interface LineItemLike {
-  weightKgm: number;
-  lengthFt: number;
-  pieces: number;
+export interface TaxGroup {
+  hsn: string;
   rate: number;
-}
-
-export function itemWeightKg(item: LineItemLike): number {
-  return item.weightKgm * item.lengthFt * FT_TO_M * item.pieces;
-}
-
-export function itemAmount(item: LineItemLike): number {
-  return itemWeightKg(item) * item.rate;
+  taxable: number;
+  tax: number;
 }
 
 export interface Totals {
-  itemsSubtotal: number;
-  extraCharges: number;
+  lines: { taxable: number; tax: number; gross: number }[];
+  extra: { taxable: number; tax: number };
+  groups: TaxGroup[];
   taxable: number;
-  gstAmount: number;
+  tax: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  roundOff: number;
   total: number;
-  totalWeightKg: number;
 }
 
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+export const lineGross = (l: Pick<Line, "qty" | "unitPrice">) => l.qty * l.unitPrice;
+
+// Extra (forwarding) charges are taxed at the highest line rate, as a composite supply follows the principal item.
 export function computeTotals(
-  items: { weightKgm: number; lengthFt: number; pieces: number; rate: number }[],
+  lines: Pick<Line, "qty" | "unitPrice" | "gstRate" | "hsn">[],
   extraCharges: number,
-  gstRate: number
+  opts: { inclusive: boolean; igst: boolean }
 ): Totals {
-  const itemsSubtotal = items.reduce((s, it) => s + itemWeightKg(it) * it.rate, 0);
-  const totalWeightKg = items.reduce((s, it) => s + itemWeightKg(it), 0);
-  const taxable = itemsSubtotal + extraCharges;
-  const gstAmount = taxable * (gstRate / 100);
+  const split = (gross: number, rate: number) => {
+    const taxable = opts.inclusive ? gross / (1 + rate / 100) : gross;
+    return { taxable, tax: taxable * (rate / 100), gross: opts.inclusive ? gross : taxable * (1 + rate / 100) };
+  };
+  const perLine = lines.map((l) => split(lineGross(l), l.gstRate));
+  const extraRate = Math.max(0, ...lines.map((l) => l.gstRate));
+  const extra = split(extraCharges, extraRate);
+
+  const groups = new Map<string, TaxGroup>();
+  const addGroup = (hsn: string, rate: number, taxable: number, tax: number) => {
+    const k = `${hsn}|${rate}`;
+    const g = groups.get(k) ?? { hsn, rate, taxable: 0, tax: 0 };
+    g.taxable += taxable;
+    g.tax += tax;
+    groups.set(k, g);
+  };
+  lines.forEach((l, i) => addGroup(l.hsn || "—", l.gstRate, perLine[i]!.taxable, perLine[i]!.tax));
+  if (extraCharges > 0) addGroup("Freight", extraRate, extra.taxable, extra.tax);
+
+  const taxable = r2(perLine.reduce((s, x) => s + x.taxable, 0) + extra.taxable);
+  const tax = r2(perLine.reduce((s, x) => s + x.tax, 0) + extra.tax);
+  const exact = taxable + tax;
+  const total = Math.round(exact);
+  const half = r2(tax / 2);
   return {
-    itemsSubtotal,
-    extraCharges,
+    lines: perLine,
+    extra: { taxable: extra.taxable, tax: extra.tax },
+    groups: [...groups.values()],
     taxable,
-    gstAmount,
-    total: taxable + gstAmount,
-    totalWeightKg,
+    tax,
+    cgst: opts.igst ? 0 : half,
+    sgst: opts.igst ? 0 : r2(tax - half),
+    igst: opts.igst ? tax : 0,
+    roundOff: r2(total - exact),
+    total,
   };
 }
 
-export function computeTotalsFromRows(items: QuoteItemRow[], extraCharges: number, gstRate: number): Totals {
-  const itemsSubtotal = items.reduce(
-    (s, it) => s + (it.weight_kgm ?? 0) * it.length_ft * FT_TO_M * it.pieces * it.sell_rate_kg,
-    0
-  );
-  const totalWeightKg = items.reduce((s, it) => s + (it.weight_kgm ?? 0) * it.length_ft * FT_TO_M * it.pieces, 0);
-  const taxable = itemsSubtotal + extraCharges;
-  const gstAmount = taxable * (gstRate / 100);
-  return {
-    itemsSubtotal,
-    extraCharges,
-    taxable,
-    gstAmount,
-    total: taxable + gstAmount,
-    totalWeightKg,
-  };
-}
+export const fmtMoney = (n: number) =>
+  "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: n % 1 ? 2 : 0 });
+export const fmtNum = (n: number, digits = 2) => n.toLocaleString("en-IN", { maximumFractionDigits: digits });
 
-export function fmtMoney(n: number): string {
-  return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 0 });
-}
-
-export function fmtNum(n: number, digits = 2): string {
-  return n.toLocaleString("en-IN", { maximumFractionDigits: digits });
-}
-
-export function nextQuoteNo(count: number, date = new Date()): string {
+export function nextQuoteNo(code: string, count: number, date = new Date()): string {
   const ym = `${String(date.getFullYear()).slice(2)}${String(date.getMonth() + 1).padStart(2, "0")}`;
-  return `Q-${ym}-${String(count + 1).padStart(3, "0")}`;
+  return `${code}-${ym}-${String(count + 1).padStart(3, "0")}`;
 }
 
-export function drLabel(dr: string): string {
-  return `DR ${dr}`;
+// Indian numbering: 3,67,462 -> "Three Lakh Sixty Seven Thousand Four Hundred Sixty Two Rupees Only"
+const ONES = "Zero One Two Three Four Five Six Seven Eight Nine Ten Eleven Twelve Thirteen Fourteen Fifteen Sixteen Seventeen Eighteen Nineteen".split(" ");
+const TENS = "  Twenty Thirty Forty Fifty Sixty Seventy Eighty Ninety".split(" ");
+function below1000(n: number): string {
+  const h = Math.floor(n / 100), rest = n % 100;
+  const t = rest < 20 ? (rest ? ONES[rest] : "") : `${TENS[Math.floor(rest / 10)]}${rest % 10 ? " " + ONES[rest % 10] : ""}`;
+  return [h ? `${ONES[h]} Hundred` : "", t].filter(Boolean).join(" ");
+}
+export function inWords(amount: number): string {
+  let n = Math.round(amount);
+  if (n === 0) return "Zero Rupees Only";
+  const parts: string[] = [];
+  for (const [div, name] of [[1e7, "Crore"], [1e5, "Lakh"], [1e3, "Thousand"]] as const) {
+    const q = Math.floor(n / div);
+    if (q) parts.push(`${q >= 1000 ? inWords(q).replace(" Rupees Only", "") : below1000(q)} ${name}`);
+    n %= div;
+  }
+  if (n) parts.push(below1000(n));
+  return `${parts.join(" ")} Rupees Only`;
 }
 
-export function drClass(dr: string): string {
-  return `Class ${DR_CLASS_MAP[dr] ?? "?"}`;
-}
-
-export const DR_CLASS_MAP: Record<string, string> = {
-  "32.5": "65",
-  "26": "80",
-  "21": "100",
-  "19": "110",
-  "17": "130",
-  "13.5": "160",
-  "11": "200",
-  "9": "250",
-  "7": "335",
-};
-
-export const STATUS_LABELS: Record<string, string> = {
-  draft: "Draft",
-  sent: "Sent",
-  won: "Won",
-  lost: "Lost",
-};
-
-export function buildWhatsAppText(opts: {
+export function buildWhatsAppUrl(opts: {
   quoteNo: string;
   quoteDate: string;
-  customerName?: string | null;
-  customerPhone?: string | null;
-  companyName?: string | null;
-  gstRate: number;
-  items: { size: string; standard: string; dr: string; pieces: number; lengthFt: number; weightKg: number; rate: number }[];
+  customerName: string | null;
+  customerPhone: string | null;
+  companyName: string | null;
+  inclusive: boolean;
+  lines: Line[];
   totals: Totals;
-  notes?: string | null;
+  notes: string | null;
 }): string {
-  const lines: string[] = [];
-  lines.push("*PROFORMA QUOTATION*");
-  lines.push(`Quote No: ${opts.quoteNo}`);
-  lines.push(`Date: ${opts.quoteDate}`);
-  if (opts.customerName) lines.push(`Customer: ${opts.customerName}`);
-  lines.push("");
-  opts.items.forEach((it, i) => {
-    const amount = it.weightKg * it.rate;
-    lines.push(
-      `${i + 1}. ${it.size} ${it.standard} ${drLabel(it.dr)} — ${it.pieces} × ${it.lengthFt} ft — ${fmtNum(
-        it.weightKg
-      )} kg @ ${fmtMoney(it.rate)}/kg — ${fmtMoney(amount)}`
-    );
-  });
-  lines.push("");
-  lines.push(`Subtotal: ${fmtMoney(opts.totals.itemsSubtotal)}`);
-  if (opts.totals.extraCharges > 0) lines.push(`Extra charges: ${fmtMoney(opts.totals.extraCharges)}`);
-  lines.push(`GST @ ${opts.gstRate}%: ${fmtMoney(opts.totals.gstAmount)}`);
-  lines.push(`*Total: ${fmtMoney(opts.totals.total)}*`);
-  if (opts.notes) {
-    lines.push("");
-    lines.push(opts.notes);
-  }
-  lines.push("");
-  if (opts.companyName) lines.push(opts.companyName);
-  lines.push("Prices valid subject to final confirmation.");
-
-  const phone = opts.customerPhone ? opts.customerPhone.replace(/\D/g, "") : "";
-  const base = phone ? `https://wa.me/${phone}` : "https://wa.me/";
-  return `${base}?text=${encodeURIComponent(lines.join("\n"))}`;
+  const out = ["*PROFORMA QUOTATION*", `${opts.quoteNo} · ${opts.quoteDate}`];
+  if (opts.customerName) out.push(`To: ${opts.customerName}`);
+  out.push("");
+  opts.lines.forEach((l, i) =>
+    out.push(`${i + 1}. ${l.description}\n    ${fmtNum(l.qty)} ${UNIT_LABELS[l.unit]} × ${fmtMoney(l.unitPrice)} = ${fmtMoney(lineGross(l))}`)
+  );
+  out.push("", `Taxable: ${fmtMoney(opts.totals.taxable)}`, `GST: ${fmtMoney(opts.totals.tax)}`);
+  if (opts.totals.roundOff) out.push(`Round off: ${fmtMoney(opts.totals.roundOff)}`);
+  out.push(`*Total: ${fmtMoney(opts.totals.total)}*`, opts.inclusive ? "(rates include GST)" : "(GST extra on rates)");
+  if (opts.notes) out.push("", opts.notes);
+  if (opts.companyName) out.push("", opts.companyName);
+  const d = (opts.customerPhone ?? "").replace(/\D/g, "");
+  return `https://wa.me/${d.length === 10 ? "91" + d : d}?text=${encodeURIComponent(out.join("\n"))}`;
 }
