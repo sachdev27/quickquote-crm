@@ -81,11 +81,18 @@ export function sellRatePerKg(p: Pricing): number {
   return costPerKg(p) * (1 + p.marginPct / 100);
 }
 
-export function itemWeightKg(item: DraftItem): number {
+export interface LineItemLike {
+  weightKgm: number;
+  lengthFt: number;
+  pieces: number;
+  rate: number;
+}
+
+export function itemWeightKg(item: LineItemLike): number {
   return item.weightKgm * item.lengthFt * FT_TO_M * item.pieces;
 }
 
-export function itemAmount(item: DraftItem): number {
+export function itemAmount(item: LineItemLike): number {
   return itemWeightKg(item) * item.rate;
 }
 
