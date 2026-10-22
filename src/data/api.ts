@@ -15,6 +15,7 @@ import {
   rate_profiles,
   rates,
   brand_raw,
+  terms,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -86,6 +87,32 @@ export const deleteBrand = createServerFn({ method: "POST" })
     const [used] = await db.select({ n: count() }).from(quotes).where(eq(quotes.brand_id, data.id));
     if (used?.n) throw new Error(`Brand is on ${used.n} quote(s); it can't be deleted.`);
     await db.delete(brands).where(eq(brands.id, data.id));
+    return { ok: true };
+  });
+
+// ---------- terms ----------
+export const listTerms = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .handler(async () =>
+    (await getDb()).select().from(terms).orderBy(asc(terms.sort), asc(terms.text)),
+  );
+
+export const saveTerm = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(z.object({ id: z.string().optional(), text: text.min(1), default_on: z.boolean() }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const row = { text: data.text, default_on: data.default_on ? 1 : 0 };
+    if (data.id) await db.update(terms).set(row).where(eq(terms.id, data.id));
+    else await db.insert(terms).values({ ...row, sort: 1000 });
+    return { ok: true };
+  });
+
+export const deleteTerm = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }) => {
+    await (await getDb()).delete(terms).where(eq(terms.id, data.id));
     return { ok: true };
   });
 
@@ -314,15 +341,21 @@ export const deleteProfile = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const db = await getDb();
-    const [p] = await db.select().from(rate_profiles).where(eq(rate_profiles.id, data.id));
-    if (p?.active)
-      throw new Error("This is the active profile. Make another profile active first.");
+    const all = await db.select().from(rate_profiles).orderBy(desc(rate_profiles.created_at));
+    const p = all.find((x) => x.id === data.id);
+    if (!p) return { ok: true };
+    if (all.length === 1) throw new Error("This is the only profile; at least one must remain.");
+    // Deleting the active profile hands "active" to the newest remaining one, so quotes always have values.
+    const next = p.active ? all.find((x) => x.id !== data.id) : undefined;
     await db.batch([
       db.delete(rates).where(eq(rates.profile_id, data.id)),
       db.delete(brand_raw).where(eq(brand_raw.profile_id, data.id)),
       db.delete(rate_profiles).where(eq(rate_profiles.id, data.id)),
+      ...(next
+        ? [db.update(rate_profiles).set({ active: 1 }).where(eq(rate_profiles.id, next.id))]
+        : []),
     ]);
-    return { ok: true };
+    return { ok: true, activated: next?.name ?? null };
   });
 
 export const deletePreset = createServerFn({ method: "POST" })
@@ -568,6 +601,7 @@ export const createQuote = createServerFn({ method: "POST" })
       presetId: z.string().nullable(),
       profileId: z.string().nullable(),
       nonIsi: z.boolean().default(false),
+      terms: z.array(text.min(1)).max(30).default([]),
       newCustomer: z.object({ name: text.min(1), phone: opt, gstin: opt }).nullable(),
       igst: z.boolean(),
       extra: money,
@@ -623,6 +657,7 @@ export const createQuote = createServerFn({ method: "POST" })
             preset_id: data.presetId,
             profile_id: data.profileId,
             non_isi: data.nonIsi ? 1 : 0,
+            terms: data.terms.length ? data.terms.join("\n") : null,
             quote_date: new Date().toISOString().slice(0, 10),
             igst: data.igst ? 1 : 0,
             extra_charges: data.extra,
@@ -646,7 +681,7 @@ export const createQuote = createServerFn({ method: "POST" })
             }),
           ),
         ]);
-        return { id: quoteId };
+        return { id: quoteId, quoteNo: nextQuoteNo(brand.code, n + i) };
       } catch (e) {
         if (!String(e).includes("UNIQUE") || i === 4) throw e;
       }

@@ -7,6 +7,11 @@ type QuoteData = Awaited<ReturnType<typeof getQuote>>;
 export function QuoteDocument({ data }: { data: QuoteData }) {
   const { quote: q, brand, customer, lines } = data;
   const igst = !!q.igst;
+  // Quotes save the terms they were sent with; older quotes fall back to the brand's terms text.
+  const termList = (q.terms ?? brand?.terms ?? "")
+    .split(/\n|(?<=\.)\s+(?=[A-Z])/)
+    .map((x) => x.trim())
+    .filter(Boolean);
   const t = computeTotals(lines, q.extra_charges, { inclusive: false, igst });
   return (
     <article className="@container print-sheet rounded-2xl border border-border bg-card p-5 text-sm @2xl:p-8">
@@ -183,12 +188,16 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
 
       <footer className="mt-4 grid gap-5 text-xs @md:grid-cols-2">
         <div className="space-y-3">
-          {(brand?.terms || q.notes) && (
+          {(termList.length > 0 || q.notes) && (
             <div>
               <p className="mb-1 font-semibold uppercase tracking-wide text-muted-foreground">
-                Terms
+                Terms & conditions
               </p>
-              {brand?.terms && <p className="whitespace-pre-line">{brand.terms}</p>}
+              <ol className="list-decimal space-y-0.5 pl-4">
+                {termList.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ol>
               {q.notes && <p className="mt-1 whitespace-pre-line">{q.notes}</p>}
             </div>
           )}

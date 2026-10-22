@@ -9,7 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
 import { useIsDesktop } from "@/hooks/use-mobile";
 import type { Brand } from "@/lib/quote";
-import { deleteBrand, listBrands, listPricing, saveBrand } from "@/data/api";
+import {
+  deleteBrand,
+  deleteTerm,
+  listBrands,
+  listPricing,
+  listTerms,
+  saveBrand,
+  saveTerm,
+} from "@/data/api";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({ meta: [{ title: "Settings — Tarko CRM" }] }),
@@ -191,13 +199,11 @@ function SettingsPage() {
               </Field>
             </Card>
           </div>
-          <Card title="Terms printed on quotes">
-            <textarea
-              value={f.terms}
-              onChange={set("terms")}
-              rows={4}
-              className={`${inputCls} h-auto py-2`}
-            />
+          <Card title="Terms & conditions">
+            <p className="text-sm text-muted-foreground">
+              Terms are a shared checklist under Settings → Terms & conditions; pick which ones go
+              on each quote.
+            </p>
           </Card>
           <Card title="Pricing">
             <Field label="Default preset when this brand is picked on a quote">
@@ -286,6 +292,8 @@ function SettingsPage() {
             })}
           </section>
 
+          <TermsLibrary />
+
           <section className="space-y-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Account
@@ -355,5 +363,116 @@ function Letterhead({ f }: { f: Form }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// Terms & conditions library: ticked = pre-selected on every new quote. Click a term to edit it.
+function TermsLibrary() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["terms"], queryFn: () => listTerms(), staleTime: 60_000 });
+  const [editing, setEditing] = useState<{ id?: string; text: string } | null>(null);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["terms"] });
+
+  async function commit() {
+    if (!editing) return;
+    const text = editing.text.trim();
+    if (!text) return void setEditing(null);
+    const cur = data?.find((t) => t.id === editing.id);
+    await saveTerm({
+      data: {
+        ...(editing.id ? { id: editing.id } : {}),
+        text,
+        default_on: cur ? !!cur.default_on : true,
+      },
+    });
+    await refresh();
+    setEditing(null);
+  }
+  async function toggle(t: { id: string; text: string; default_on: number }) {
+    await saveTerm({ data: { id: t.id, text: t.text, default_on: !t.default_on } });
+    refresh();
+  }
+  async function remove(t: { id: string; text: string }) {
+    if (!confirm(`Delete term "${t.text}"? Quotes already sent keep it.`)) return;
+    await deleteTerm({ data: { id: t.id } });
+    refresh();
+  }
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Terms & conditions
+        </h2>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 text-sm font-semibold text-primary"
+          onClick={() => setEditing({ text: "" })}
+        >
+          <Plus className="h-4 w-4" /> Add term
+        </button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Ticked terms are pre-selected on every new quote; you can change them per quote.
+      </p>
+      <ul className="divide-y divide-border/60 rounded-2xl border border-border bg-card">
+        {data?.map((t) => (
+          <li key={t.id} className="flex items-start gap-3 p-3">
+            <input
+              type="checkbox"
+              aria-label="Default on new quotes"
+              checked={!!t.default_on}
+              onChange={() => toggle(t)}
+              className="mt-1 h-4 w-4 accent-[var(--primary)]"
+            />
+            {editing?.id === t.id ? (
+              <input
+                autoFocus
+                value={editing.text}
+                onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commit();
+                  if (e.key === "Escape") setEditing(null);
+                }}
+                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm outline-none focus:border-primary"
+              />
+            ) : (
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left text-sm hover:text-primary"
+                onClick={() => setEditing({ id: t.id, text: t.text })}
+              >
+                {t.text}
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label="Delete term"
+              className="text-xs text-muted-foreground hover:text-destructive"
+              onClick={() => remove(t)}
+            >
+              Delete
+            </button>
+          </li>
+        ))}
+        {editing && !editing.id && (
+          <li className="p-3">
+            <input
+              autoFocus
+              placeholder="New term, e.g. 50% advance with order."
+              value={editing.text}
+              onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commit();
+                if (e.key === "Escape") setEditing(null);
+              }}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus:border-primary"
+            />
+          </li>
+        )}
+      </ul>
+    </section>
   );
 }

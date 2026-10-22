@@ -105,6 +105,13 @@ export const brand_raw = sqliteTable(
   (t) => [primaryKey({ columns: [t.profile_id, t.brand_id, t.group_id] })],
 );
 
+export const terms = sqliteTable("terms", {
+  id: id(),
+  text: text("text").notNull(),
+  default_on: integer("default_on").notNull().default(1),
+  sort: integer("sort").notNull().default(0),
+});
+
 export const quotes = sqliteTable("quotes", {
   id: id(),
   quote_no: text("quote_no").notNull().unique(),
@@ -118,6 +125,7 @@ export const quotes = sqliteTable("quotes", {
   igst: integer("igst").notNull().default(0),
   extra_charges: real("extra_charges").notNull().default(0),
   notes: text("notes"),
+  terms: text("terms"),
   created_by: text("created_by"),
   created_at: now(),
   updated_at: text("updated_at")

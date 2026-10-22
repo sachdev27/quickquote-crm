@@ -236,6 +236,23 @@ function ProductsPage() {
       toast.error(err instanceof Error ? err.message.slice(0, 140) : "Could not save");
     }
   }
+  async function deleteProfileNow(pr: { id: string; name: string }) {
+    const active = pr.id === pricing.data?.activeProfileId;
+    const warn = `Delete profile "${pr.name}"?\n\nAll its rates and brand raw prices are removed permanently. Saved quotes keep their prices.${
+      active ? "\n\nIt is the ACTIVE profile: the newest remaining profile becomes active." : ""
+    }`;
+    if (!confirm(warn)) return;
+    try {
+      const res = await deleteProfile({ data: { id: pr.id } });
+      await qc.invalidateQueries({ queryKey: ["pricing"] });
+      setProfileId("");
+      toast.success(
+        res.activated ? `Deleted. "${res.activated}" is now active.` : "Profile deleted",
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message.slice(0, 160) : "Could not delete");
+    }
+  }
   async function removeProfile() {
     if (!profileForm?.id || !confirm(`Delete profile "${profileForm.name}" and all its values?`))
       return;
@@ -545,6 +562,7 @@ function ProductsPage() {
             onMakeActive={makeActive}
             onNewProfile={() => setProfileForm({ name: "", copyFrom: profileId })}
             onEditProfile={(pr) => setProfileForm({ id: pr.id, name: pr.name, copyFrom: "" })}
+            onDeleteProfile={deleteProfileNow}
             rateRow={gridRow}
             brands={brands.data ?? []}
             viewBrand={viewBrand}
@@ -1018,6 +1036,7 @@ function PricingGrid({
   onMakeActive,
   onNewProfile,
   onEditProfile,
+  onDeleteProfile,
   rateRow,
   onEdit,
   onRenamePreset,
@@ -1033,6 +1052,7 @@ function PricingGrid({
   onMakeActive: (id: string) => void;
   onNewProfile: () => void;
   onEditProfile: (p: { id: string; name: string }) => void;
+  onDeleteProfile: (p: { id: string; name: string }) => void;
   rateRow: (preset: string, group: string) => (Rate & { brandApplied?: boolean }) | undefined;
   brands: { id: string; name: string }[];
   viewBrand: string;
@@ -1049,18 +1069,29 @@ function PricingGrid({
     <div className="space-y-4">
       <Card title="Profile · values for a period (e.g. this quarter)">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <Chips
-              label="Profile"
+          <label className="flex min-w-0 flex-1 items-center gap-2">
+            <select
+              aria-label="Profile"
               value={profileId}
-              onChange={onProfile}
-              options={pricing.profiles.map((p) => ({
-                value: p.id,
-                label: p.name,
-                sub: p.id === pricing.activeProfileId ? "● active" : "inactive",
-              }))}
-            />
-          </div>
+              onChange={(e) => onProfile(e.target.value)}
+              className={`${inputCls} max-w-md font-semibold`}
+            >
+              {pricing.profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.id === pricing.activeProfileId ? "  ● active" : ""}
+                </option>
+              ))}
+            </select>
+            {isActive && (
+              <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                Active
+              </span>
+            )}
+            <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+              {pricing.profiles.length} profiles
+            </span>
+          </label>
           {current && !isActive && (
             <Button className="h-11 rounded-xl" onClick={() => onMakeActive(current.id)}>
               Make active
@@ -1073,6 +1104,17 @@ function PricingGrid({
               onClick={() => onEditProfile(current)}
             >
               Rename
+            </Button>
+          )}
+          {current && (
+            <Button
+              variant="ghost"
+              className="h-11 rounded-xl text-destructive hover:text-destructive"
+              disabled={pricing.profiles.length < 2}
+              title={pricing.profiles.length < 2 ? "At least one profile must remain" : undefined}
+              onClick={() => onDeleteProfile(current)}
+            >
+              Delete
             </Button>
           )}
           <Button variant="outline" className="h-11 rounded-xl" onClick={onNewProfile}>

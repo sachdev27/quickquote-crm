@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Plus, Trash2, UserPlus } from "lucide-react";
+import { ChevronDown, MessageCircle, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, Field, Stepper, inputCls } from "@/components/qq";
@@ -14,11 +14,13 @@ import {
   listCustomers,
   listPricing,
   listProducts,
+  listTerms,
   saveProduct,
 } from "@/data/api";
 import { LAST_BRAND, LAST_PRESET, newPipe, normalizePn, shortName } from "@/lib/catalog";
 import {
   CATEGORY_LABELS,
+  buildWhatsAppUrl,
   GST_OPTIONS,
   UNIT_LABELS,
   computeTotals,
@@ -106,7 +108,6 @@ function NewQuote() {
 
   const [brandId, setBrandId] = useState("");
   const [customerId, setCustomerId] = useState("");
-  const [addingCustomer, setAddingCustomer] = useState(false);
   const [nc, setNc] = useState({ name: "", phone: "", gstin: "" });
   const [presetId, setPresetId] = useState("");
   const [profileId, setProfileId] = useState("");
@@ -121,6 +122,23 @@ function NewQuote() {
   const [sheet, setSheet] = useState(false);
   const [saving, setSaving] = useState(false);
   const desktop = useIsDesktop();
+  const [ratesOpen, setRatesOpen] = useState(false);
+  const termsQ = useQuery({ queryKey: ["terms"], queryFn: () => listTerms(), staleTime: 60_000 });
+  const [termSel, setTermSel] = useState<Set<string>>(new Set());
+  const [termsSeeded, setTermsSeeded] = useState(false);
+  const [extraTerms, setExtraTerms] = useState<string[]>([]);
+  const [termDraft, setTermDraft] = useState("");
+  // Default terms start ticked once the library loads.
+  useEffect(() => {
+    if (termsQ.data && !termsSeeded) {
+      setTermSel(new Set(termsQ.data.filter((t) => t.default_on).map((t) => t.id)));
+      setTermsSeeded(true);
+    }
+  }, [termsQ.data, termsSeeded]);
+  const selectedTerms = [
+    ...(termsQ.data ?? []).filter((t) => termSel.has(t.id)).map((t) => t.text),
+    ...extraTerms,
+  ];
 
   useEffect(() => {
     if (brands.data?.length && !brandId)
@@ -183,14 +201,23 @@ function NewQuote() {
     (g) => !usedGroups.length || usedGroups.includes(g.id),
   );
 
-  async function save() {
+  async function save(share = false) {
     const brand = brands.data?.find((b) => b.id === brandId);
     if (!brand) return void toast.error("Add a brand first");
+    if (!lines.length) return void toast.error("Add at least one item");
     if (priced.some((l) => l.unitPrice <= 0))
       return void toast.error("Some items have no price. Check weight and ₹/kg.");
+    // Open the WhatsApp tab now (inside the click) so popup blockers allow it; fill it once saved.
+    const tab = share ? window.open("", "_blank") : null;
     setSaving(true);
     try {
-      const { id } = await createQuote({
+      const out = priced.map(({ key: _k, rateEdited: _r, rateGroupId: _g, ...l }) => ({
+        ...l,
+        description: isNonIsiLine({ ...l, rateGroupId: _g })
+          ? `${l.description} · Non-ISI`
+          : l.description,
+      }));
+      const { id, quoteNo } = await createQuote({
         data: {
           brandId: brand.id,
           customerId: customerId || null,
@@ -201,30 +228,71 @@ function NewQuote() {
           igst,
           extra: num(extra),
           notes,
-          lines: priced.map(({ key: _k, rateEdited: _r, rateGroupId: _g, ...l }) => ({
-            ...l,
-            description: isNonIsiLine({ ...l, rateGroupId: _g })
-              ? `${l.description} · Non-ISI`
-              : l.description,
-          })),
+          terms: selectedTerms,
+          lines: out,
         },
       });
+      if (tab) {
+        const cust = customers.data?.find((c) => c.id === customerId);
+        tab.location.href = buildWhatsAppUrl({
+          quoteNo,
+          quoteDate: new Date().toISOString().slice(0, 10),
+          customerName: cust?.name ?? (nc.name.trim() || null),
+          customerPhone: cust?.phone ?? (nc.phone.trim() || null),
+          companyName: [brand.name, brand.tagline, brand.phone].filter(Boolean).join(" · "),
+          lines: out.map((l) => ({ ...l, rateGroupId: null })),
+          totals,
+          notes: [notes, ...selectedTerms].filter(Boolean).join("\n") || null,
+        });
+      }
       qc.invalidateQueries({ queryKey: ["quotes"] });
       qc.invalidateQueries({ queryKey: ["customers"] });
       navigate({ to: "/quotes/$id", params: { id } });
     } catch (e) {
+      tab?.close();
       toast.error(e instanceof Error ? e.message : "Could not save quote");
       setSaving(false);
     }
   }
 
+  // Keyboard: "/" jumps to quick add, Ctrl/Cmd+S saves.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing =
+        e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        quickRef.current?.focus();
+      } else if (e.key.toLowerCase() === "s" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        saveRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const saveBtn = (
     <Button
-      onClick={save}
+      onClick={() => save()}
       disabled={saving || !lines.length}
       className="h-12 rounded-xl px-6 text-base font-semibold"
     >
       {saving ? "Saving…" : "Save quote"}
+    </Button>
+  );
+  const shareBtn = (
+    <Button
+      variant="outline"
+      onClick={() => save(true)}
+      disabled={saving || !lines.length}
+      className="h-12 rounded-xl px-4 font-semibold"
+      title="Save and send on WhatsApp"
+    >
+      <MessageCircle className="h-5 w-5 lg:mr-1" />
+      <span className="hidden lg:inline">Save & WhatsApp</span>
     </Button>
   );
 
@@ -298,493 +366,652 @@ function NewQuote() {
   const cell =
     "h-9 w-full rounded-lg border border-input bg-background px-2 text-right text-sm tabular-nums outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 
+  // Quick add: "63 6 2" = 63 mm PN 6, 2 rolls · "pe80 90 8 300m" · "cut 50 6 40m" · "spr 10".
+  const quickRef = useRef<HTMLInputElement>(null);
+  const [quick, setQuick] = useState("");
+  function quickAdd() {
+    const toks = quick
+      .toLowerCase()
+      .split(/[\s,x×]+/)
+      .filter(Boolean);
+    if (!toks.length) return;
+    const all = prods.data ?? [];
+    if (/^spr/.test(toks[0]!) || /^fit/.test(toks[0]!)) {
+      const cat = /^spr/.test(toks[0]!) ? "sprinkler" : "fitting";
+      const p = all.find((x) => x.category === cat);
+      const n = Number(toks[1] ?? 1) || 1;
+      if (!p) return void toast.error(`No ${cat} products yet`);
+      addFromCatalogQty(p, n);
+      setQuick("");
+      return;
+    }
+    const grade = toks.find((t) => /^pe\d+$/.test(t))?.toUpperCase();
+    const roll = toks.includes("cut") ? "cut" : "complete";
+    const nums = toks.filter((t) => /^\d+(\.\d+)?m?$/.test(t));
+    const [size, pn, qtyTok] = [Number(nums[0]), Number(nums[1]), nums[2]];
+    if (!size || !pn) return void toast.error('Type size and PN, e.g. "63 6 2"');
+    const p = all.find(
+      (x) =>
+        x.category === "pipe" &&
+        x.size_mm === size &&
+        pnNumber(x.pn) === pn &&
+        (x.roll ?? "complete") === roll &&
+        (!grade || x.grade === grade),
+    );
+    if (!p)
+      return void toast.error(
+        `No ${grade ?? ""} ${size} mm PN ${pn}${roll === "cut" ? " cut roll" : ""} in products`,
+      );
+    const len = (p.roll_lengths ?? "").split("/").map(Number).find(Boolean);
+    const qty = qtyTok?.endsWith("m")
+      ? Number(qtyTok.slice(0, -1))
+      : (Number(qtyTok ?? 1) || 1) * (len ?? 100);
+    addFromCatalogQty(p, qty);
+    toast.success(`Added ${p.grade} ${size} mm PN ${pn} · ${fmtNum(qty)} m`, { duration: 1200 });
+    setQuick("");
+  }
+  function addFromCatalogQty(p: Product, qty: number) {
+    const existing = lines.find((l) => l.productId === p.id);
+    if (existing) return patch(existing.key, { qty: existing.qty + qty });
+    addLine(
+      {
+        productId: p.id,
+        rateGroupId: p.rate_group_id,
+        category: p.category as Category,
+        description: p.name,
+        hsn: p.hsn,
+        unit: p.unit as Unit,
+        qty,
+        weightKg: p.weight_kg,
+        rateKg: rateOf(p.rate_group_id),
+        unitPrice: p.weight_kg * rateOf(p.rate_group_id),
+        gstRate: p.gst_rate,
+      },
+      true,
+    );
+  }
+
+  // Customer: type to search; anything not matching becomes a new customer (phone/GSTIN fields appear).
+  const custLabel = (c: { name: string; phone: string | null }) =>
+    `${c.name}${c.phone ? ` · ${c.phone}` : ""}`;
+  const [custText, setCustText] = useState("");
+  const onCustomer = (v: string) => {
+    setCustText(v);
+    const hit = customers.data?.find((c) => custLabel(c) === v);
+    setCustomerId(hit?.id ?? "");
+    setNc({ ...nc, name: hit ? "" : v });
+  };
+
+  const selectCls =
+    "h-11 w-full rounded-xl border border-input bg-background px-3 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+  const ratesSummary = shownGroups
+    .map((g) => `${g.name.replace("HDPE ", "")} ${fmtMoney(formRate(rates[g.id], nonIsi))}`)
+    .join(" · ");
+
   return (
     <PageShell
       title="New quote"
       wide
       bar={
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-2">
           <div>
             <p className="text-xs text-muted-foreground tabular-nums">
               {lines.length} items · {fmtNum(priced.reduce((s, l) => s + lineWeight(l), 0))} kg
             </p>
             <p className="text-xl font-bold tabular-nums leading-tight">{fmtMoney(totals.total)}</p>
           </div>
-          {saveBtn}
+          <div className="flex gap-2">
+            {shareBtn}
+            {saveBtn}
+          </div>
         </div>
       }
     >
-      {/* Phone: one column. Tablet: items | setup+totals. Desktop: catalog | (setup, items, sticky totals bar). */}
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_22rem] md:items-start lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <aside className="hidden lg:sticky lg:top-20 lg:col-start-1 lg:row-span-3 lg:row-start-1 lg:block lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
-          <CatalogPanel
-            products={prods.data ?? []}
-            rateOf={rateOf}
-            onPick={addFromCatalog}
-            onMore={() => setSheet(true)}
-            inQuote={new Set(lines.map((l) => l.productId ?? ""))}
-          />
-        </aside>
-
-        <div className="space-y-4 md:col-start-2 md:row-start-1 lg:col-start-2 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
-          <div className="space-y-4">
-            {brands.data && brands.data.length > 1 && (
-              <Field label="Brand">
-                <Chips
-                  label="Brand"
-                  value={brandId}
-                  options={brands.data.map((b) => ({ value: b.id, label: b.name }))}
-                  onChange={(id) => {
-                    setBrandId(id);
-                    remember(LAST_BRAND, id);
-                    const pid = brands.data?.find((b) => b.id === id)?.default_preset_id;
-                    if (pid && pricing.data?.presets.some((p) => p.id === pid)) setPresetId(pid);
-                  }}
-                />
-              </Field>
-            )}
-            <Card
-              title="Customer"
-              aside={
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-sm font-medium text-primary"
-                  onClick={() => {
-                    setAddingCustomer((v) => !v);
-                    setCustomerId("");
-                  }}
-                >
-                  <UserPlus className="h-4 w-4" /> {addingCustomer ? "Pick existing" : "New"}
-                </button>
-              }
-            >
-              {addingCustomer ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    placeholder="Name"
-                    value={nc.name}
-                    onChange={(e) => setNc({ ...nc, name: e.target.value })}
-                    className={`${inputCls} col-span-2`}
-                  />
-                  <input
-                    placeholder="Phone"
-                    inputMode="tel"
-                    value={nc.phone}
-                    onChange={(e) => setNc({ ...nc, phone: e.target.value })}
-                    className={inputCls}
-                  />
-                  <input
-                    placeholder="GSTIN (optional)"
-                    value={nc.gstin}
-                    onChange={(e) => setNc({ ...nc, gstin: e.target.value.toUpperCase() })}
-                    className={inputCls}
-                  />
-                </div>
-              ) : (
-                <select
-                  className={inputCls}
-                  value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
-                  aria-label="Customer"
-                >
-                  <option value="">No customer (walk-in)</option>
-                  {customers.data?.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                      {c.phone ? ` · ${c.phone}` : ""}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </Card>
-          </div>
-          <Card title="Pricing · ₹ per kg">
-            {pricing.data && pricing.data.profiles.length > 1 && (
-              <Chips
-                label="Profile"
-                value={profileId}
-                onChange={setProfileId}
-                options={pricing.data.profiles.map((p) => ({
-                  value: p.id,
-                  label: p.name,
-                  sub: p.id === pricing.data!.activeProfileId ? "● active" : "",
-                }))}
-              />
-            )}
-            <Chips
-              label="ISI marking"
-              value={nonIsi ? "non" : "isi"}
-              onChange={(v) => setNonIsi(v === "non")}
-              options={[
-                { value: "isi", label: "ISI marked" },
-                { value: "non", label: "Non-ISI", sub: "own raw price" },
-              ]}
+      <div className="space-y-4">
+        {/* command bar: who, which brand, which price basis — one row on desktop */}
+        <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2.2fr)_repeat(4,minmax(0,1fr))]">
+          <div className="sm:col-span-2 lg:col-span-1">
+            <input
+              list="customer-list"
+              aria-label="Customer"
+              placeholder="Customer: type name or phone (blank = walk-in)"
+              value={custText}
+              onChange={(e) => onCustomer(e.target.value)}
+              className={`${inputCls} h-11`}
             />
-            {pricing.data && pricing.data.presets.length > 0 && (
-              <Chips
-                label="Preset"
-                value={presetId}
-                onChange={(id) => {
-                  setPresetId(id);
-                  remember(LAST_PRESET, id);
-                }}
-                options={pricing.data.presets.map((p) => ({ value: p.id, label: p.name }))}
-              />
+            <datalist id="customer-list">
+              {customers.data?.map((c) => (
+                <option key={c.id} value={custLabel(c)} />
+              ))}
+            </datalist>
+            {custText && !customerId && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <input
+                  placeholder="Phone (new customer)"
+                  inputMode="tel"
+                  value={nc.phone}
+                  onChange={(e) => setNc({ ...nc, phone: e.target.value })}
+                  className={`${inputCls} h-10`}
+                />
+                <input
+                  placeholder="GSTIN (optional)"
+                  value={nc.gstin}
+                  onChange={(e) => setNc({ ...nc, gstin: e.target.value.toUpperCase() })}
+                  className={`${inputCls} h-10`}
+                />
+              </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              Raw + production + transport + margin. Tap a grade to pick a different preset for it,
-              or adjust values for this quote only.
-            </p>
-            <ul className="-my-1 divide-y divide-border/60 lg:grid lg:grid-cols-2 lg:gap-x-6 lg:divide-y-0">
-              {shownGroups.map((c) => {
-                const f = rates[c.id];
-                const open = openCard === c.id;
-                const set = (k: keyof RateForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
-                  f && setRates({ ...rates, [c.id]: { ...f, [k]: e.target.value } });
-                return (
-                  <li
-                    key={c.id}
-                    className={`border-border/60 py-1 lg:border-b ${open ? "lg:col-span-2" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setOpenCard(open ? "" : c.id)}
-                      className="flex w-full items-center justify-between py-2 text-left"
-                      aria-expanded={open}
-                    >
-                      <span className="min-w-0">
-                        <span className="block font-medium">{c.name}</span>
-                        {groupPreset[c.id] && groupPreset[c.id] !== presetId && (
-                          <span className="block text-xs font-semibold text-primary">
-                            {presetName(groupPreset[c.id]!)} preset
-                          </span>
-                        )}
-                      </span>
-                      <span className="flex items-center gap-2 text-lg font-bold tabular-nums">
-                        {fmtMoney(formRate(f, nonIsi))}
-                        <span className="text-xs font-medium text-muted-foreground">/kg</span>
-                        <ChevronDown
-                          className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-                        />
-                      </span>
-                    </button>
-                    {open && f && (
-                      <div className="space-y-2 pb-2">
-                        {pricing.data && pricing.data.presets.length > 1 && (
-                          <Chips
-                            label={`Preset for ${c.name}`}
-                            value={groupPreset[c.id] ?? presetId}
-                            onChange={(pid) => pickGroupPreset(c.id, pid)}
-                            options={pricing.data.presets.map((p) => {
-                              const r = rateRow(p.id, c.id);
-                              return {
-                                value: p.id,
-                                label: p.name,
-                                sub: r
-                                  ? `₹${fmtNum(ratePerKg(withBrandRaw(r, brandRawFor(c.id)), nonIsi))}/kg`
-                                  : "not set",
-                              };
-                            })}
-                          />
-                        )}
-                        <div className="grid grid-cols-2 gap-2">
-                          <Field label="Raw material ₹/kg">
-                            <input
-                              inputMode="decimal"
-                              value={f.raw}
-                              onFocus={(e) => e.currentTarget.select()}
-                              onChange={set("raw")}
-                              className={inputCls}
-                            />
-                          </Field>
-                          <Field label="Non-ISI raw ₹/kg">
-                            <input
-                              inputMode="decimal"
-                              value={f.rawNonIsi}
-                              placeholder="same as ISI"
-                              onFocus={(e) => e.currentTarget.select()}
-                              onChange={set("rawNonIsi")}
-                              className={inputCls}
-                            />
-                          </Field>
-                          <Field label="Production ₹/kg">
-                            <input
-                              inputMode="decimal"
-                              value={f.production}
-                              onFocus={(e) => e.currentTarget.select()}
-                              onChange={set("production")}
-                              className={inputCls}
-                            />
-                          </Field>
-                          <Field label="Transport ₹/kg">
-                            <input
-                              inputMode="decimal"
-                              value={f.transport}
-                              onFocus={(e) => e.currentTarget.select()}
-                              onChange={set("transport")}
-                              className={inputCls}
-                            />
-                          </Field>
-                          <Field label={`Margin ${f.pct ? "%" : "₹/kg"}`}>
-                            <input
-                              inputMode="decimal"
-                              value={f.margin}
-                              onFocus={(e) => e.currentTarget.select()}
-                              onChange={set("margin")}
-                              className={inputCls}
-                            />
-                          </Field>
-                        </div>
-                        <p className="text-xs text-muted-foreground tabular-nums">
-                          Cost{" "}
-                          {fmtMoney(
-                            costPerKg({
-                              raw_kg: num(f.raw),
-                              production_kg: num(f.production),
-                              transport_kg: num(f.transport),
-                            }),
-                          )}
-                          /kg + margin ={" "}
-                          <span className="font-semibold text-foreground">
-                            {fmtMoney(formRate(f, nonIsi))}/kg{nonIsi ? " (Non-ISI)" : ""}
-                          </span>
-                        </p>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </Card>
+          </div>
+          <select
+            aria-label="Brand"
+            value={brandId}
+            className={selectCls}
+            onChange={(e) => {
+              const id = e.target.value;
+              setBrandId(id);
+              remember(LAST_BRAND, id);
+              const pid = brands.data?.find((b) => b.id === id)?.default_preset_id;
+              if (pid && pricing.data?.presets.some((p) => p.id === pid)) setPresetId(pid);
+            }}
+          >
+            {brands.data?.map((b) => (
+              <option key={b.id} value={b.id}>
+                Brand: {b.name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Preset"
+            value={presetId}
+            className={selectCls}
+            onChange={(e) => {
+              setPresetId(e.target.value);
+              remember(LAST_PRESET, e.target.value);
+            }}
+          >
+            {pricing.data?.presets.map((p) => (
+              <option key={p.id} value={p.id}>
+                Preset: {p.name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="ISI marking"
+            value={nonIsi ? "non" : "isi"}
+            className={`${selectCls} ${nonIsi ? "border-amber-400 text-amber-800" : ""}`}
+            onChange={(e) => setNonIsi(e.target.value === "non")}
+          >
+            <option value="isi">ISI marked</option>
+            <option value="non">Non-ISI</option>
+          </select>
+          <select
+            aria-label="Profile"
+            value={profileId}
+            className={selectCls}
+            onChange={(e) => setProfileId(e.target.value)}
+          >
+            {pricing.data?.profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.id === pricing.data!.activeProfileId ? " ●" : ""}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="space-y-4 md:col-start-1 md:row-span-2 md:row-start-1 lg:col-start-2 lg:row-span-1 lg:row-start-2">
-          <Card title={`Items · ${lines.length}`}>
-            {/* phone / tablet cards */}
-            <div className="space-y-3 lg:hidden">
-              {priced.map((l) => (
-                <div key={l.key} className="rounded-xl border border-border p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
-                        {CATEGORY_LABELS[l.category]} · GST {l.gstRate}%
-                        {isNonIsiLine(l) ? " · Non-ISI" : ""}
-                      </p>
-                      <p className="font-semibold leading-snug">{l.description}</p>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Remove item"
-                      className="-m-2 p-2 text-muted-foreground"
-                      onClick={() => removeLine(l.key)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <Field label={`Qty (${UNIT_LABELS[l.unit]})`}>{qtyIn(l)}</Field>
-                    <Field
-                      label={
-                        l.weightKg > 0
-                          ? `₹/kg${l.rateEdited ? " (edited)" : ""}`
-                          : `₹/${UNIT_LABELS[l.unit]}`
-                      }
-                    >
-                      {priceIn(l)}
-                    </Field>
-                  </div>
-                  <div className="mt-2 flex items-baseline justify-between text-sm tabular-nums">
-                    <span className="text-muted-foreground">
-                      {l.weightKg > 0
-                        ? `${fmtNum(l.weightKg, 3)} kg/${UNIT_LABELS[l.unit]} → ${fmtMoney(l.unitPrice)}/${UNIT_LABELS[l.unit]} · ${fmtNum(lineWeight(l))} kg`
-                        : `${fmtMoney(l.unitPrice)}/${UNIT_LABELS[l.unit]}`}
-                    </span>
-                    <span className="font-semibold">{fmtMoney(lineGross(l))}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] lg:items-start">
+          <aside className="hidden lg:sticky lg:top-20 lg:block lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+            <CatalogPanel
+              products={prods.data ?? []}
+              rateOf={rateOf}
+              onPick={addFromCatalog}
+              onMore={() => setSheet(true)}
+              inQuote={new Set(lines.map((l) => l.productId ?? ""))}
+            />
+          </aside>
 
-            {/* desktop spreadsheet */}
-            <div className="hidden lg:block">
-              {lines.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-                  Click a price in the catalog on the left to add it. Click again to add another
-                  roll.
-                </p>
-              ) : (
-                <table className="w-full tabular-nums">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="py-2 pr-2 font-semibold">Item</th>
-                      <th className="w-24 px-1 text-right font-semibold">Qty</th>
-                      <th className="w-20 px-1 text-right font-semibold">Kg</th>
-                      <th className="w-24 px-1 text-right font-semibold">₹/kg</th>
-                      <th className="w-24 px-1 text-right font-semibold">₹/unit</th>
-                      <th className="w-14 px-1 text-right font-semibold">GST</th>
-                      <th className="w-28 px-1 text-right font-semibold">Amount</th>
-                      <th className="w-8" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {priced.map((l) => (
-                      <tr key={l.key} className="border-b border-border/60 align-middle">
-                        <td className="py-1.5 pr-2">
-                          <p className="text-sm font-medium leading-tight">{l.description}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {[
-                              CATEGORY_LABELS[l.category],
-                              rollHint(l),
-                              isNonIsiLine(l) && "Non-ISI",
-                              l.rateEdited && "₹/kg edited",
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </p>
-                        </td>
-                        <td className="px-1">
-                          <div className="flex items-center gap-1">
-                            {qtyIn(l, cell)}
-                            <span className="w-7 text-xs text-muted-foreground">
-                              {UNIT_LABELS[l.unit]}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-1 text-right text-sm">
-                          {l.weightKg > 0 ? fmtNum(lineWeight(l)) : "—"}
-                        </td>
-                        <td className="px-1">
-                          {l.weightKg > 0 ? (
-                            priceIn(l, cell)
-                          ) : (
-                            <span className="block text-right text-sm text-muted-foreground">
-                              —
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-1 text-right text-sm">
-                          {l.weightKg > 0 ? fmtNum(l.unitPrice) : priceIn(l, cell)}
-                        </td>
-                        <td className="px-1 text-right text-sm">{l.gstRate}%</td>
-                        <td className="px-1 text-right text-sm font-semibold">
-                          {fmtMoney(lineGross(l))}
-                        </td>
-                        <td className="pl-1 text-right">
+          <div className="space-y-4">
+            <Card title={`Items · ${lines.length}`}>
+              <div className="flex gap-2">
+                <input
+                  ref={quickRef}
+                  aria-label="Quick add"
+                  value={quick}
+                  onChange={(e) => setQuick(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && quickAdd()}
+                  placeholder='Quick add: "63 6 2" (mm, PN, rolls) · "pe80 90 8 300m" · "cut 50 6 40m" · "spr 10"   ( / )'
+                  className={`${inputCls} h-11 font-mono text-sm`}
+                />
+                <Button variant="outline" className="h-11 shrink-0 rounded-xl" onClick={quickAdd}>
+                  Add
+                </Button>
+              </div>
+              {/* phone / tablet cards */}
+              <div className="space-y-3 lg:hidden">
+                {priced.map((l) => (
+                  <div key={l.key} className="rounded-xl border border-border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                          {CATEGORY_LABELS[l.category]} · GST {l.gstRate}%
+                          {isNonIsiLine(l) ? " · Non-ISI" : ""}
+                        </p>
+                        <p className="font-semibold leading-snug">{l.description}</p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Remove item"
+                        className="-m-2 p-2 text-muted-foreground"
+                        onClick={() => removeLine(l.key)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Field label={`Qty (${UNIT_LABELS[l.unit]})`}>{qtyIn(l)}</Field>
+                      <Field
+                        label={
+                          l.weightKg > 0
+                            ? `₹/kg${l.rateEdited ? " (edited)" : ""}`
+                            : `₹/${UNIT_LABELS[l.unit]}`
+                        }
+                      >
+                        {priceIn(l)}
+                      </Field>
+                    </div>
+                    <div className="mt-2 flex items-baseline justify-between text-sm tabular-nums">
+                      <span className="text-muted-foreground">
+                        {l.weightKg > 0
+                          ? `${fmtNum(l.weightKg, 3)} kg/${UNIT_LABELS[l.unit]} → ${fmtMoney(l.unitPrice)}/${UNIT_LABELS[l.unit]} · ${fmtNum(lineWeight(l))} kg`
+                          : `${fmtMoney(l.unitPrice)}/${UNIT_LABELS[l.unit]}`}
+                      </span>
+                      <span className="font-semibold">{fmtMoney(lineGross(l))}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* desktop spreadsheet */}
+              <div className="hidden lg:block">
+                {lines.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                    Click a price in the catalog on the left to add it. Click again to add another
+                    roll.
+                  </p>
+                ) : (
+                  <table className="w-full tabular-nums">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="py-2 pr-2 font-semibold">Item</th>
+                        <th className="w-24 px-1 text-right font-semibold">Qty</th>
+                        <th className="w-20 px-1 text-right font-semibold">Kg</th>
+                        <th className="w-24 px-1 text-right font-semibold">₹/kg</th>
+                        <th className="w-24 px-1 text-right font-semibold">₹/unit</th>
+                        <th className="w-14 px-1 text-right font-semibold">GST</th>
+                        <th className="w-28 px-1 text-right font-semibold">Amount</th>
+                        <th className="w-8" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {priced.map((l) => (
+                        <tr key={l.key} className="border-b border-border/60 align-middle">
+                          <td className="py-1.5 pr-2">
+                            <p className="text-sm font-medium leading-tight">{l.description}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {[
+                                CATEGORY_LABELS[l.category],
+                                rollHint(l),
+                                isNonIsiLine(l) && "Non-ISI",
+                                l.rateEdited && "₹/kg edited",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          </td>
+                          <td className="px-1">
+                            <div className="flex items-center gap-1">
+                              {qtyIn(l, cell)}
+                              <span className="w-7 text-xs text-muted-foreground">
+                                {UNIT_LABELS[l.unit]}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-1 text-right text-sm">
+                            {l.weightKg > 0 ? fmtNum(lineWeight(l)) : "—"}
+                          </td>
+                          <td className="px-1">
+                            {l.weightKg > 0 ? (
+                              priceIn(l, cell)
+                            ) : (
+                              <span className="block text-right text-sm text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-1 text-right text-sm">
+                            {l.weightKg > 0 ? fmtNum(l.unitPrice) : priceIn(l, cell)}
+                          </td>
+                          <td className="px-1 text-right text-sm">{l.gstRate}%</td>
+                          <td className="px-1 text-right text-sm font-semibold">
+                            {fmtMoney(lineGross(l))}
+                          </td>
+                          <td className="pl-1 text-right">
+                            <button
+                              type="button"
+                              aria-label="Remove item"
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                              onClick={() => removeLine(l.key)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {desktop && (
+                <AddItemSheet
+                  inline
+                  open={sheet}
+                  onOpenChange={setSheet}
+                  products={prods.data ?? []}
+                  groups={pricing.data?.groups ?? []}
+                  rateOf={rateOf}
+                  onAdd={(l) => addLine(l)}
+                />
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSheet(desktop ? !sheet : true)}
+                className="h-12 w-full rounded-xl border-dashed text-base lg:h-10 lg:text-sm"
+              >
+                <Plus className="mr-1 h-5 w-5" /> <span className="lg:hidden">Add item</span>
+                <span className="hidden lg:inline">
+                  {sheet ? "Close custom item" : "Custom item, new size or custom length"}
+                </span>
+              </Button>
+            </Card>
+
+            <Card>
+              <button
+                type="button"
+                onClick={() => setRatesOpen((o) => !o)}
+                className="flex w-full items-center justify-between gap-3 text-left"
+                aria-expanded={ratesOpen}
+              >
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Rates ₹/kg{nonIsi ? " · Non-ISI" : ""}
+                  </span>
+                  <span className="block truncate text-sm font-semibold tabular-nums">
+                    {ratesSummary || "—"}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-primary">
+                  {ratesOpen ? "Hide" : "Adjust"}{" "}
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${ratesOpen ? "rotate-180" : ""}`}
+                  />
+                </span>
+              </button>
+              {ratesOpen && (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Raw + production + transport + margin. Tap a grade to pick another preset for it
+                    or adjust values for this quote only.
+                  </p>
+                  <ul className="-my-1 divide-y divide-border/60 lg:grid lg:grid-cols-2 lg:gap-x-6 lg:divide-y-0">
+                    {shownGroups.map((c) => {
+                      const f = rates[c.id];
+                      const open = openCard === c.id;
+                      const set = (k: keyof RateForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+                        f && setRates({ ...rates, [c.id]: { ...f, [k]: e.target.value } });
+                      return (
+                        <li
+                          key={c.id}
+                          className={`border-border/60 py-1 lg:border-b ${open ? "lg:col-span-2" : ""}`}
+                        >
                           <button
                             type="button"
-                            aria-label="Remove item"
-                            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                            onClick={() => removeLine(l.key)}
+                            onClick={() => setOpenCard(open ? "" : c.id)}
+                            className="flex w-full items-center justify-between py-2 text-left"
+                            aria-expanded={open}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <span className="min-w-0">
+                              <span className="block font-medium">{c.name}</span>
+                              {groupPreset[c.id] && groupPreset[c.id] !== presetId && (
+                                <span className="block text-xs font-semibold text-primary">
+                                  {presetName(groupPreset[c.id]!)} preset
+                                </span>
+                              )}
+                            </span>
+                            <span className="flex items-center gap-2 text-lg font-bold tabular-nums">
+                              {fmtMoney(formRate(f, nonIsi))}
+                              <span className="text-xs font-medium text-muted-foreground">/kg</span>
+                              <ChevronDown
+                                className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+                              />
+                            </span>
                           </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          {open && f && (
+                            <div className="space-y-2 pb-2">
+                              {pricing.data && pricing.data.presets.length > 1 && (
+                                <Chips
+                                  label={`Preset for ${c.name}`}
+                                  value={groupPreset[c.id] ?? presetId}
+                                  onChange={(pid) => pickGroupPreset(c.id, pid)}
+                                  options={pricing.data.presets.map((p) => {
+                                    const r = rateRow(p.id, c.id);
+                                    return {
+                                      value: p.id,
+                                      label: p.name,
+                                      sub: r
+                                        ? `₹${fmtNum(ratePerKg(withBrandRaw(r, brandRawFor(c.id)), nonIsi))}/kg`
+                                        : "not set",
+                                    };
+                                  })}
+                                />
+                              )}
+                              <div className="grid grid-cols-2 gap-2">
+                                <Field label="Raw material ₹/kg">
+                                  <input
+                                    inputMode="decimal"
+                                    value={f.raw}
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    onChange={set("raw")}
+                                    className={inputCls}
+                                  />
+                                </Field>
+                                <Field label="Non-ISI raw ₹/kg">
+                                  <input
+                                    inputMode="decimal"
+                                    value={f.rawNonIsi}
+                                    placeholder="same as ISI"
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    onChange={set("rawNonIsi")}
+                                    className={inputCls}
+                                  />
+                                </Field>
+                                <Field label="Production ₹/kg">
+                                  <input
+                                    inputMode="decimal"
+                                    value={f.production}
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    onChange={set("production")}
+                                    className={inputCls}
+                                  />
+                                </Field>
+                                <Field label="Transport ₹/kg">
+                                  <input
+                                    inputMode="decimal"
+                                    value={f.transport}
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    onChange={set("transport")}
+                                    className={inputCls}
+                                  />
+                                </Field>
+                                <Field label={`Margin ${f.pct ? "%" : "₹/kg"}`}>
+                                  <input
+                                    inputMode="decimal"
+                                    value={f.margin}
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    onChange={set("margin")}
+                                    className={inputCls}
+                                  />
+                                </Field>
+                              </div>
+                              <p className="text-xs text-muted-foreground tabular-nums">
+                                Cost{" "}
+                                {fmtMoney(
+                                  costPerKg({
+                                    raw_kg: num(f.raw),
+                                    production_kg: num(f.production),
+                                    transport_kg: num(f.transport),
+                                  }),
+                                )}
+                                /kg + margin ={" "}
+                                <span className="font-semibold text-foreground">
+                                  {fmtMoney(formRate(f, nonIsi))}/kg{nonIsi ? " (Non-ISI)" : ""}
+                                </span>
+                              </p>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
               )}
-            </div>
+            </Card>
 
-            {desktop && (
-              <AddItemSheet
-                inline
-                open={sheet}
-                onOpenChange={setSheet}
-                products={prods.data ?? []}
-                groups={pricing.data?.groups ?? []}
-                rateOf={rateOf}
-                onAdd={(l) => addLine(l)}
-              />
-            )}
-            <textarea
-              className="hidden w-full rounded-xl border border-input bg-background p-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 lg:block"
-              rows={2}
-              placeholder="Notes: delivery, validity, payment terms…"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setSheet(desktop ? !sheet : true)}
-              className="h-12 w-full rounded-xl border-dashed text-base lg:h-10 lg:text-sm"
-            >
-              <Plus className="mr-1 h-5 w-5" /> <span className="lg:hidden">Add item</span>
-              <span className="hidden lg:inline">
-                {sheet ? "Close custom item" : "Custom item, new size or custom length"}
-              </span>
-            </Button>
-          </Card>
-
-          <Card title="Tax & charges" className="lg:hidden">
-            <label className="flex items-center justify-between">
-              <span className="text-sm font-medium">Inter-state supply (IGST)</span>
-              <Switch checked={igst} onCheckedChange={setIgst} />
-            </label>
-            <Field label="Forwarding / extra charges ₹">
+            <Card title={`Terms & conditions · ${selectedTerms.length}`}>
+              <ul className="space-y-1.5">
+                {(termsQ.data ?? []).map((t) => (
+                  <li key={t.id}>
+                    <label className="flex cursor-pointer items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
+                        checked={termSel.has(t.id)}
+                        onChange={() => {
+                          const n = new Set(termSel);
+                          if (n.has(t.id)) n.delete(t.id);
+                          else n.add(t.id);
+                          setTermSel(n);
+                        }}
+                      />
+                      <span>{t.text}</span>
+                    </label>
+                  </li>
+                ))}
+                {extraTerms.map((t, i) => (
+                  <li key={t} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked
+                      readOnly
+                      className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
+                    />
+                    <span className="flex-1">
+                      {t} <span className="text-xs text-muted-foreground">(this quote only)</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-destructive"
+                      onClick={() => setExtraTerms(extraTerms.filter((_, j) => j !== i))}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
               <input
-                inputMode="decimal"
-                value={extra}
-                onChange={(e) => setExtra(e.target.value)}
-                className={inputCls}
+                placeholder="Add a term for this quote only, press Enter"
+                value={termDraft}
+                onChange={(e) => setTermDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && termDraft.trim()) {
+                    setExtraTerms([...extraTerms, termDraft.trim()]);
+                    setTermDraft("");
+                  }
+                }}
+                className={`${inputCls} h-10 text-sm`}
               />
-            </Field>
-            <textarea
-              className="min-h-20 w-full rounded-xl border border-input bg-background p-3 text-base outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              placeholder="Notes: delivery, validity, payment terms…"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </Card>
-        </div>
+              <textarea
+                className="w-full rounded-xl border border-input bg-background p-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                rows={2}
+                placeholder="Notes (delivery address, contact, remarks…)"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </Card>
 
-        <div className="md:sticky md:top-20 md:col-start-2 md:row-start-2 lg:bottom-4 lg:top-auto lg:col-start-2 lg:row-start-3">
-          <Card className="lg:shadow-lg">
-            <div className="lg:hidden">
+            <Card title="Tax & charges" className="lg:hidden">
+              <label className="flex items-center justify-between">
+                <span className="text-sm font-medium">Inter-state supply (IGST)</span>
+                <Switch checked={igst} onCheckedChange={setIgst} />
+              </label>
+              <Field label="Forwarding / extra charges ₹">
+                <input
+                  inputMode="decimal"
+                  value={extra}
+                  onChange={(e) => setExtra(e.target.value)}
+                  className={inputCls}
+                />
+              </Field>
               <TotalsBlock totals={totals} igst={igst} />
-              <div className="hidden pt-2 md:block [&>button]:w-full">{saveBtn}</div>
-            </div>
+            </Card>
+
             {/* desktop: one compact sticky bar */}
-            <div className="hidden items-center justify-between gap-6 tabular-nums lg:flex">
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
-                <label className="flex items-center gap-2 font-medium text-foreground">
-                  IGST <Switch checked={igst} onCheckedChange={setIgst} />
-                </label>
-                <label className="flex items-center gap-2">
-                  Freight ₹
-                  <input
-                    inputMode="decimal"
-                    value={extra}
-                    onChange={(e) => setExtra(e.target.value)}
-                    placeholder="0"
-                    className="h-9 w-24 rounded-lg border border-input bg-background px-2 text-right text-sm text-foreground outline-none focus:border-primary"
-                  />
-                </label>
-                <span>
-                  {lines.length} items · {fmtNum(priced.reduce((s, l) => s + lineWeight(l), 0))} kg
-                </span>
-                <span>
-                  Taxable <b className="text-foreground">{fmtMoney(totals.taxable)}</b>
-                </span>
-                {igst ? (
-                  <span>
-                    IGST <b className="text-foreground">{fmtMoney(totals.igst)}</b>
-                  </span>
-                ) : (
-                  <span>
-                    CGST + SGST{" "}
-                    <b className="text-foreground">{fmtMoney(totals.cgst + totals.sgst)}</b>
-                  </span>
-                )}
-                {totals.roundOff !== 0 && <span>Round off {fmtMoney(totals.roundOff)}</span>}
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="text-2xl font-bold">{fmtMoney(totals.total)}</span>
-                {saveBtn}
-              </div>
+            <div className="hidden lg:sticky lg:bottom-4 lg:block">
+              <Card className="shadow-lg">
+                <div className="flex items-center justify-between gap-6 tabular-nums">
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+                    <label className="flex items-center gap-2 font-medium text-foreground">
+                      IGST <Switch checked={igst} onCheckedChange={setIgst} />
+                    </label>
+                    <label className="flex items-center gap-2">
+                      Freight ₹
+                      <input
+                        inputMode="decimal"
+                        value={extra}
+                        onChange={(e) => setExtra(e.target.value)}
+                        placeholder="0"
+                        className="h-9 w-24 rounded-lg border border-input bg-background px-2 text-right text-sm text-foreground outline-none focus:border-primary"
+                      />
+                    </label>
+                    <span>
+                      {lines.length} items · {fmtNum(priced.reduce((s, l) => s + lineWeight(l), 0))}{" "}
+                      kg
+                    </span>
+                    <span>
+                      Taxable <b className="text-foreground">{fmtMoney(totals.taxable)}</b>
+                    </span>
+                    {igst ? (
+                      <span>
+                        IGST <b className="text-foreground">{fmtMoney(totals.igst)}</b>
+                      </span>
+                    ) : (
+                      <span>
+                        CGST + SGST{" "}
+                        <b className="text-foreground">{fmtMoney(totals.cgst + totals.sgst)}</b>
+                      </span>
+                    )}
+                    {totals.roundOff !== 0 && <span>Round off {fmtMoney(totals.roundOff)}</span>}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl font-bold">{fmtMoney(totals.total)}</span>
+                    {shareBtn}
+                    {saveBtn}
+                  </div>
+                </div>
+              </Card>
             </div>
-          </Card>
+          </div>
         </div>
       </div>
 
