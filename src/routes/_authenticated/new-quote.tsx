@@ -1,95 +1,212 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, UserPlus } from "lucide-react";
+import { ChevronDown, Plus, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, Field, Stepper, inputCls } from "@/components/qq";
 import { Button } from "@/components/ui/button";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
 import { Switch } from "@/components/ui/switch";
-import { createQuote, getPriceList, listBrands, listCustomers, listPriceLists } from "@/data/api";
-import { LAST_BRAND, LAST_LIST, shortName } from "@/lib/catalog";
-import { CATEGORY_LABELS, GST_OPTIONS, UNIT_LABELS, computeTotals, fmtMoney, fmtNum, lineGross, type Category, type Line, type Unit } from "@/lib/quote";
+import {
+  createQuote,
+  listBrands,
+  listCustomers,
+  listPricing,
+  listProducts,
+  saveProduct,
+} from "@/data/api";
+import { LAST_BRAND, LAST_PRESET, newPipe, normalizePn, shortName } from "@/lib/catalog";
+import {
+  CATEGORY_LABELS,
+  GST_OPTIONS,
+  UNIT_LABELS,
+  computeTotals,
+  costPerKg,
+  fmtMoney,
+  fmtNum,
+  lineGross,
+  lineWeight,
+  ratePerKg,
+  withBrandRaw,
+  type Category,
+  type Line,
+  type Rate,
+  type Unit,
+} from "@/lib/quote";
 import { recall, remember } from "@/lib/utils";
+import { useIsDesktop } from "@/hooks/use-mobile";
+import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
 
 export const Route = createFileRoute("/_authenticated/new-quote")({
   head: () => ({ meta: [{ title: "New quote — Tarko CRM" }] }),
   component: NewQuote,
 });
 
-type Item = Awaited<ReturnType<typeof getPriceList>>["items"][number];
-// priceEdited: a hand-typed price survives switching price lists; untouched lines re-price from the new list.
-type Draft = Line & { key: string; priceEdited: boolean };
+type Product = Awaited<ReturnType<typeof listProducts>>[number];
+// rateEdited: a hand-typed ₹/kg on the line wins over the quote's rate card.
+type Draft = Line & { key: string; rateEdited: boolean };
+type RateForm = {
+  raw: string;
+  rawNonIsi: string; // blank = no separate non-ISI price
+  production: string;
+  transport: string;
+  margin: string;
+  pct: boolean;
+};
 
 const num = (s: string) => (s === "" || isNaN(+s) ? 0 : +s);
 const uniq = <T,>(xs: T[]) => [...new Set(xs)];
+const formRate = (f: RateForm | undefined, nonIsi = false) =>
+  f
+    ? ratePerKg(
+        {
+          raw_kg: num(f.raw),
+          raw_kg_non_isi: f.rawNonIsi.trim() === "" ? null : num(f.rawNonIsi),
+          production_kg: num(f.production),
+          transport_kg: num(f.transport),
+          margin: num(f.margin),
+          margin_is_pct: f.pct ? 1 : 0,
+        },
+        nonIsi,
+      )
+    : 0;
+const toForm = (c: Rate): RateForm => ({
+  raw: String(c.raw_kg),
+  rawNonIsi: c.raw_kg_non_isi != null ? String(c.raw_kg_non_isi) : "",
+  production: String(c.production_kg),
+  transport: String(c.transport_kg),
+  margin: String(c.margin),
+  pct: !!c.margin_is_pct,
+});
 
 function NewQuote() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const brands = useQuery({ queryKey: ["brands"], queryFn: () => listBrands(), staleTime: 5 * 60_000 });
-  const lists = useQuery({ queryKey: ["price-lists"], queryFn: () => listPriceLists(), staleTime: 60_000 });
-  const customers = useQuery({ queryKey: ["customers"], queryFn: () => listCustomers(), staleTime: 60_000 });
+  const brands = useQuery({
+    queryKey: ["brands"],
+    queryFn: () => listBrands(),
+    staleTime: 5 * 60_000,
+  });
+  const pricing = useQuery({
+    queryKey: ["pricing"],
+    queryFn: () => listPricing(),
+    staleTime: 60_000,
+  });
+  const prods = useQuery({
+    queryKey: ["products"],
+    queryFn: () => listProducts(),
+    staleTime: 60_000,
+  });
+  const customers = useQuery({
+    queryKey: ["customers"],
+    queryFn: () => listCustomers(),
+    staleTime: 60_000,
+  });
 
   const [brandId, setBrandId] = useState("");
-  const [listId, setListId] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [nc, setNc] = useState({ name: "", phone: "", gstin: "" });
-  const [inclusive, setInclusive] = useState(true);
+  const [presetId, setPresetId] = useState("");
+  const [profileId, setProfileId] = useState("");
+  const [nonIsi, setNonIsi] = useState(false);
+  const [rates, setRates] = useState<Record<string, RateForm>>({});
+  const [groupPreset, setGroupPreset] = useState<Record<string, string>>({}); // per-grade override of the quote preset
+  const [openCard, setOpenCard] = useState("");
   const [igst, setIgst] = useState(false);
   const [extra, setExtra] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<Draft[]>([]);
   const [sheet, setSheet] = useState(false);
   const [saving, setSaving] = useState(false);
+  const desktop = useIsDesktop();
 
-  const list = useQuery({ queryKey: ["price-list", listId], queryFn: () => getPriceList({ data: { id: listId } }), enabled: !!listId, staleTime: 60_000 });
-
-  // Pre-select the last-used brand and price list on this device.
   useEffect(() => {
-    if (brands.data?.length && !brandId) setBrandId(brands.data.find((b) => b.id === recall(LAST_BRAND))?.id ?? brands.data[0]?.id ?? "");
+    if (brands.data?.length && !brandId)
+      setBrandId(
+        brands.data.find((b) => b.id === recall(LAST_BRAND))?.id ?? brands.data[0]?.id ?? "",
+      );
   }, [brands.data, brandId]);
   useEffect(() => {
-    if (lists.data?.length && !listId) setListId(lists.data.find((l) => l.id === recall(LAST_LIST))?.id ?? lists.data[0]?.id ?? "");
-  }, [lists.data, listId]);
-
-  // New list loaded: take its GST basis and re-price untouched catalog lines.
+    const ps = pricing.data?.presets;
+    if (ps?.length && !presetId)
+      setPresetId(ps.find((p) => p.id === recall(LAST_PRESET))?.id ?? ps[0]!.id);
+  }, [pricing.data, presetId]);
   useEffect(() => {
-    const d = list.data;
-    if (!d) return;
-    setInclusive(!!d.list.prices_include_gst);
-    const byId = new Map(d.items.map((p) => [p.id, p.price]));
-    setLines((ls) => ls.map((l) => (l.productId && !l.priceEdited && byId.get(l.productId) != null ? { ...l, unitPrice: byId.get(l.productId)! } : l)));
-  }, [list.data]);
+    if (pricing.data && !profileId) setProfileId(pricing.data.activeProfileId);
+  }, [pricing.data, profileId]);
+  // Picking a profile/preset loads its saved ₹/kg values; edits here only affect this quote.
+  useEffect(() => {
+    if (!pricing.data || !presetId || !profileId) return;
+    setGroupPreset({});
+    setRates(
+      Object.fromEntries(
+        pricing.data.rates
+          .filter((r) => r.profile_id === profileId && r.preset_id === presetId)
+          .map((r) => [r.group_id, toForm(withBrandRaw(r, brandRawFor(r.group_id)))]),
+      ),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- brandRawFor derives from these deps
+  }, [pricing.data, presetId, profileId, brandId]);
+  // The brand's own raw price (per grade, per profile), if set.
+  function brandRawFor(group: string) {
+    return pricing.data?.brandRaw.find(
+      (b) => b.profile_id === profileId && b.brand_id === brandId && b.group_id === group,
+    );
+  }
+  const rateRow = (pid: string, group: string) =>
+    pricing.data?.rates.find(
+      (x) => x.profile_id === profileId && x.preset_id === pid && x.group_id === group,
+    );
+  const pickGroupPreset = (group: string, pid: string) => {
+    const r = rateRow(pid, group);
+    setGroupPreset({ ...groupPreset, [group]: pid });
+    if (r) setRates({ ...rates, [group]: toForm(withBrandRaw(r, brandRawFor(group))) });
+    else toast.error("That preset has no rate for this grade yet");
+  };
+  const presetName = (id: string) => pricing.data?.presets.find((p) => p.id === id)?.name ?? "";
 
-  const totals = computeTotals(lines, num(extra), { inclusive, igst });
-  const patch = (key: string, p: Partial<Draft>) => setLines((l) => l.map((x) => (x.key === key ? { ...x, ...p } : x)));
+  const rateOf = (id: string | null) => (id ? formRate(rates[id], nonIsi) : 0);
+  // Lines priced with a separate non-ISI raw price are labelled so the quote never implies an ISI mark.
+  const isNonIsiLine = (l: Line) =>
+    nonIsi && !!l.rateGroupId && (rates[l.rateGroupId]?.rawNonIsi.trim() ?? "") !== "";
+  const priced: Draft[] = lines.map((l) => {
+    const rateKg = l.rateEdited || !l.rateGroupId ? l.rateKg : rateOf(l.rateGroupId);
+    return { ...l, rateKg, unitPrice: l.weightKg > 0 ? l.weightKg * rateKg : l.unitPrice };
+  });
+  const totals = computeTotals(priced, num(extra), { inclusive: false, igst });
+  const patch = (key: string, p: Partial<Draft>) =>
+    setLines((l) => l.map((x) => (x.key === key ? { ...x, ...p } : x)));
+  const usedGroups = uniq(lines.map((l) => l.rateGroupId).filter(Boolean));
+  const shownGroups = (pricing.data?.groups ?? []).filter(
+    (g) => !usedGroups.length || usedGroups.includes(g.id),
+  );
 
   async function save() {
     const brand = brands.data?.find((b) => b.id === brandId);
-    if (!brand) {
-      toast.error("Add a brand first");
-      return;
-    }
-    if (lines.some((l) => l.unitPrice <= 0)) {
-      toast.error("Some items have no price");
-      return;
-    }
+    if (!brand) return void toast.error("Add a brand first");
+    if (priced.some((l) => l.unitPrice <= 0))
+      return void toast.error("Some items have no price. Check weight and ₹/kg.");
     setSaving(true);
     try {
       const { id } = await createQuote({
         data: {
           brandId: brand.id,
-          priceListId: listId || null,
           customerId: customerId || null,
+          presetId: presetId || null,
+          profileId: profileId || null,
+          nonIsi,
           newCustomer: !customerId && nc.name.trim() ? nc : null,
-          inclusive,
           igst,
           extra: num(extra),
           notes,
-          lines: lines.map(({ key: _k, priceEdited: _p, ...l }) => l),
+          lines: priced.map(({ key: _k, rateEdited: _r, rateGroupId: _g, ...l }) => ({
+            ...l,
+            description: isNonIsiLine({ ...l, rateGroupId: _g })
+              ? `${l.description} · Non-ISI`
+              : l.description,
+          })),
         },
       });
       qc.invalidateQueries({ queryKey: ["quotes"] });
@@ -102,135 +219,753 @@ function NewQuote() {
   }
 
   const saveBtn = (
-    <Button onClick={save} disabled={saving || !lines.length} className="h-12 rounded-xl px-6 text-base font-semibold">
+    <Button
+      onClick={save}
+      disabled={saving || !lines.length}
+      className="h-12 rounded-xl px-6 text-base font-semibold"
+    >
       {saving ? "Saving…" : "Save quote"}
     </Button>
   );
 
+  const addLine = (l: Line, quiet = false) => {
+    setLines((x) => [...x, { ...l, key: crypto.randomUUID(), rateEdited: false }]);
+    if (!quiet) toast.success("Added", { duration: 1000 });
+  };
+  // Desktop catalog click: add the product, or bump its qty by one roll / step if it's already on the quote.
+  const addFromCatalog = (p: Product) => {
+    const step =
+      (p.roll_lengths ?? "").split("/").map(Number).find(Boolean) ?? (p.unit === "m" ? 100 : 10);
+    const existing = lines.find((l) => l.productId === p.id);
+    if (existing) return patch(existing.key, { qty: existing.qty + step });
+    addLine(
+      {
+        productId: p.id,
+        rateGroupId: p.rate_group_id,
+        category: p.category as Category,
+        description: p.name,
+        hsn: p.hsn,
+        unit: p.unit as Unit,
+        qty: step,
+        weightKg: p.weight_kg,
+        rateKg: rateOf(p.rate_group_id),
+        unitPrice: p.weight_kg * rateOf(p.rate_group_id),
+        gstRate: p.gst_rate,
+      },
+      true,
+    );
+  };
+  const removeLine = (key: string) => setLines((x) => x.filter((l) => l.key !== key));
+  const qtyIn = (l: Draft, cls = inputCls) => (
+    <input
+      aria-label="Quantity"
+      inputMode="decimal"
+      value={l.qty}
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => patch(l.key, { qty: num(e.target.value) })}
+      className={cls}
+    />
+  );
+  const priceIn = (l: Draft, cls = inputCls) =>
+    l.weightKg > 0 ? (
+      <input
+        aria-label="Rate per kg"
+        inputMode="decimal"
+        value={+l.rateKg.toFixed(2) || ""}
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => patch(l.key, { rateKg: num(e.target.value), rateEdited: true })}
+        className={cls}
+      />
+    ) : (
+      <input
+        aria-label="Unit price"
+        inputMode="decimal"
+        value={l.unitPrice || ""}
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => patch(l.key, { unitPrice: num(e.target.value) })}
+        className={cls}
+      />
+    );
+  const rollHint = (l: Draft) => {
+    const p = l.productId ? prods.data?.find((x) => x.id === l.productId) : undefined;
+    const len = (p?.roll_lengths ?? "")
+      .split("/")
+      .map(Number)
+      .filter(Boolean)
+      .find((x) => l.qty >= x && l.qty % x === 0);
+    return len ? `${l.qty / len} roll${l.qty / len > 1 ? "s" : ""} × ${len} m` : "";
+  };
+  const cell =
+    "h-9 w-full rounded-lg border border-input bg-background px-2 text-right text-sm tabular-nums outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+
   return (
     <PageShell
       title="New quote"
+      wide
       bar={
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs text-muted-foreground">{lines.length} items · {inclusive ? "incl. GST" : "+ GST"}</p>
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {lines.length} items · {fmtNum(priced.reduce((s, l) => s + lineWeight(l), 0))} kg
+            </p>
             <p className="text-xl font-bold tabular-nums leading-tight">{fmtMoney(totals.total)}</p>
           </div>
           {saveBtn}
         </div>
       }
     >
-      <div className="grid gap-4 md:grid-cols-[1fr_22rem] md:items-start">
-        <div className="space-y-4">
-          {brands.data && brands.data.length > 1 && (
-            <Field label="Brand">
-              <Chips label="Brand" value={brandId} onChange={(id) => { setBrandId(id); remember(LAST_BRAND, id); }}
-                options={brands.data.map((b) => ({ value: b.id, label: b.name }))} />
-            </Field>
-          )}
-          {lists.data && lists.data.length > 0 && (
-            <Field label="Price list">
-              <Chips label="Price list" value={listId} onChange={(id) => { setListId(id); remember(LAST_LIST, id); }}
-                options={lists.data.map((l) => ({ value: l.id, label: l.name, sub: l.prices_include_gst ? "incl. GST" : "+ GST" }))} />
-            </Field>
-          )}
+      {/* Phone: one column. Tablet: items | setup+totals. Desktop: catalog | (setup, items, sticky totals bar). */}
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_22rem] md:items-start lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <aside className="hidden lg:sticky lg:top-20 lg:col-start-1 lg:row-span-3 lg:row-start-1 lg:block lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+          <CatalogPanel
+            products={prods.data ?? []}
+            rateOf={rateOf}
+            onPick={addFromCatalog}
+            onMore={() => setSheet(true)}
+            inQuote={new Set(lines.map((l) => l.productId ?? ""))}
+          />
+        </aside>
 
-          <Card
-            title="Customer"
-            aside={
-              <button type="button" className="inline-flex items-center gap-1 text-sm font-medium text-primary" onClick={() => { setAddingCustomer((v) => !v); setCustomerId(""); }}>
-                <UserPlus className="h-4 w-4" /> {addingCustomer ? "Pick existing" : "New"}
-              </button>
-            }
-          >
-            {addingCustomer ? (
-              <div className="grid grid-cols-2 gap-2">
-                <input placeholder="Name" value={nc.name} onChange={(e) => setNc({ ...nc, name: e.target.value })} className={`${inputCls} col-span-2`} />
-                <input placeholder="Phone" inputMode="tel" value={nc.phone} onChange={(e) => setNc({ ...nc, phone: e.target.value })} className={inputCls} />
-                <input placeholder="GSTIN (optional)" value={nc.gstin} onChange={(e) => setNc({ ...nc, gstin: e.target.value.toUpperCase() })} className={inputCls} />
-              </div>
-            ) : (
-              <select className={inputCls} value={customerId} onChange={(e) => setCustomerId(e.target.value)} aria-label="Customer">
-                <option value="">No customer (walk-in)</option>
-                {customers.data?.map((c) => <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ""}</option>)}
-              </select>
+        <div className="space-y-4 md:col-start-2 md:row-start-1 lg:col-start-2 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
+          <div className="space-y-4">
+            {brands.data && brands.data.length > 1 && (
+              <Field label="Brand">
+                <Chips
+                  label="Brand"
+                  value={brandId}
+                  options={brands.data.map((b) => ({ value: b.id, label: b.name }))}
+                  onChange={(id) => {
+                    setBrandId(id);
+                    remember(LAST_BRAND, id);
+                    const pid = brands.data?.find((b) => b.id === id)?.default_preset_id;
+                    if (pid && pricing.data?.presets.some((p) => p.id === pid)) setPresetId(pid);
+                  }}
+                />
+              </Field>
             )}
+            <Card
+              title="Customer"
+              aside={
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-sm font-medium text-primary"
+                  onClick={() => {
+                    setAddingCustomer((v) => !v);
+                    setCustomerId("");
+                  }}
+                >
+                  <UserPlus className="h-4 w-4" /> {addingCustomer ? "Pick existing" : "New"}
+                </button>
+              }
+            >
+              {addingCustomer ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    placeholder="Name"
+                    value={nc.name}
+                    onChange={(e) => setNc({ ...nc, name: e.target.value })}
+                    className={`${inputCls} col-span-2`}
+                  />
+                  <input
+                    placeholder="Phone"
+                    inputMode="tel"
+                    value={nc.phone}
+                    onChange={(e) => setNc({ ...nc, phone: e.target.value })}
+                    className={inputCls}
+                  />
+                  <input
+                    placeholder="GSTIN (optional)"
+                    value={nc.gstin}
+                    onChange={(e) => setNc({ ...nc, gstin: e.target.value.toUpperCase() })}
+                    className={inputCls}
+                  />
+                </div>
+              ) : (
+                <select
+                  className={inputCls}
+                  value={customerId}
+                  onChange={(e) => setCustomerId(e.target.value)}
+                  aria-label="Customer"
+                >
+                  <option value="">No customer (walk-in)</option>
+                  {customers.data?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.phone ? ` · ${c.phone}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Card>
+          </div>
+          <Card title="Pricing · ₹ per kg">
+            {pricing.data && pricing.data.profiles.length > 1 && (
+              <Chips
+                label="Profile"
+                value={profileId}
+                onChange={setProfileId}
+                options={pricing.data.profiles.map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                  sub: p.id === pricing.data!.activeProfileId ? "● active" : "",
+                }))}
+              />
+            )}
+            <Chips
+              label="ISI marking"
+              value={nonIsi ? "non" : "isi"}
+              onChange={(v) => setNonIsi(v === "non")}
+              options={[
+                { value: "isi", label: "ISI marked" },
+                { value: "non", label: "Non-ISI", sub: "own raw price" },
+              ]}
+            />
+            {pricing.data && pricing.data.presets.length > 0 && (
+              <Chips
+                label="Preset"
+                value={presetId}
+                onChange={(id) => {
+                  setPresetId(id);
+                  remember(LAST_PRESET, id);
+                }}
+                options={pricing.data.presets.map((p) => ({ value: p.id, label: p.name }))}
+              />
+            )}
+            <p className="text-xs text-muted-foreground">
+              Raw + production + transport + margin. Tap a grade to pick a different preset for it,
+              or adjust values for this quote only.
+            </p>
+            <ul className="-my-1 divide-y divide-border/60 lg:grid lg:grid-cols-2 lg:gap-x-6 lg:divide-y-0">
+              {shownGroups.map((c) => {
+                const f = rates[c.id];
+                const open = openCard === c.id;
+                const set = (k: keyof RateForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+                  f && setRates({ ...rates, [c.id]: { ...f, [k]: e.target.value } });
+                return (
+                  <li
+                    key={c.id}
+                    className={`border-border/60 py-1 lg:border-b ${open ? "lg:col-span-2" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setOpenCard(open ? "" : c.id)}
+                      className="flex w-full items-center justify-between py-2 text-left"
+                      aria-expanded={open}
+                    >
+                      <span className="min-w-0">
+                        <span className="block font-medium">{c.name}</span>
+                        {groupPreset[c.id] && groupPreset[c.id] !== presetId && (
+                          <span className="block text-xs font-semibold text-primary">
+                            {presetName(groupPreset[c.id]!)} preset
+                          </span>
+                        )}
+                      </span>
+                      <span className="flex items-center gap-2 text-lg font-bold tabular-nums">
+                        {fmtMoney(formRate(f, nonIsi))}
+                        <span className="text-xs font-medium text-muted-foreground">/kg</span>
+                        <ChevronDown
+                          className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+                        />
+                      </span>
+                    </button>
+                    {open && f && (
+                      <div className="space-y-2 pb-2">
+                        {pricing.data && pricing.data.presets.length > 1 && (
+                          <Chips
+                            label={`Preset for ${c.name}`}
+                            value={groupPreset[c.id] ?? presetId}
+                            onChange={(pid) => pickGroupPreset(c.id, pid)}
+                            options={pricing.data.presets.map((p) => {
+                              const r = rateRow(p.id, c.id);
+                              return {
+                                value: p.id,
+                                label: p.name,
+                                sub: r
+                                  ? `₹${fmtNum(ratePerKg(withBrandRaw(r, brandRawFor(c.id)), nonIsi))}/kg`
+                                  : "not set",
+                              };
+                            })}
+                          />
+                        )}
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label="Raw material ₹/kg">
+                            <input
+                              inputMode="decimal"
+                              value={f.raw}
+                              onFocus={(e) => e.currentTarget.select()}
+                              onChange={set("raw")}
+                              className={inputCls}
+                            />
+                          </Field>
+                          <Field label="Non-ISI raw ₹/kg">
+                            <input
+                              inputMode="decimal"
+                              value={f.rawNonIsi}
+                              placeholder="same as ISI"
+                              onFocus={(e) => e.currentTarget.select()}
+                              onChange={set("rawNonIsi")}
+                              className={inputCls}
+                            />
+                          </Field>
+                          <Field label="Production ₹/kg">
+                            <input
+                              inputMode="decimal"
+                              value={f.production}
+                              onFocus={(e) => e.currentTarget.select()}
+                              onChange={set("production")}
+                              className={inputCls}
+                            />
+                          </Field>
+                          <Field label="Transport ₹/kg">
+                            <input
+                              inputMode="decimal"
+                              value={f.transport}
+                              onFocus={(e) => e.currentTarget.select()}
+                              onChange={set("transport")}
+                              className={inputCls}
+                            />
+                          </Field>
+                          <Field label={`Margin ${f.pct ? "%" : "₹/kg"}`}>
+                            <input
+                              inputMode="decimal"
+                              value={f.margin}
+                              onFocus={(e) => e.currentTarget.select()}
+                              onChange={set("margin")}
+                              className={inputCls}
+                            />
+                          </Field>
+                        </div>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          Cost{" "}
+                          {fmtMoney(
+                            costPerKg({
+                              raw_kg: num(f.raw),
+                              production_kg: num(f.production),
+                              transport_kg: num(f.transport),
+                            }),
+                          )}
+                          /kg + margin ={" "}
+                          <span className="font-semibold text-foreground">
+                            {fmtMoney(formRate(f, nonIsi))}/kg{nonIsi ? " (Non-ISI)" : ""}
+                          </span>
+                        </p>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           </Card>
+        </div>
 
+        <div className="space-y-4 md:col-start-1 md:row-span-2 md:row-start-1 lg:col-start-2 lg:row-span-1 lg:row-start-2">
           <Card title={`Items · ${lines.length}`}>
-            {lines.map((l, i) => (
-              <div key={l.key} className="rounded-xl border border-border p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">{CATEGORY_LABELS[l.category]} · GST {l.gstRate}%</p>
-                    <p className="font-semibold leading-snug">{l.description}</p>
+            {/* phone / tablet cards */}
+            <div className="space-y-3 lg:hidden">
+              {priced.map((l) => (
+                <div key={l.key} className="rounded-xl border border-border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                        {CATEGORY_LABELS[l.category]} · GST {l.gstRate}%
+                        {isNonIsiLine(l) ? " · Non-ISI" : ""}
+                      </p>
+                      <p className="font-semibold leading-snug">{l.description}</p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Remove item"
+                      className="-m-2 p-2 text-muted-foreground"
+                      onClick={() => removeLine(l.key)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
-                  <button type="button" aria-label="Remove item" className="-m-2 p-2 text-muted-foreground" onClick={() => setLines((x) => x.filter((_, j) => j !== i))}>
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Field label={`Qty (${UNIT_LABELS[l.unit]})`}>{qtyIn(l)}</Field>
+                    <Field
+                      label={
+                        l.weightKg > 0
+                          ? `₹/kg${l.rateEdited ? " (edited)" : ""}`
+                          : `₹/${UNIT_LABELS[l.unit]}`
+                      }
+                    >
+                      {priceIn(l)}
+                    </Field>
+                  </div>
+                  <div className="mt-2 flex items-baseline justify-between text-sm tabular-nums">
+                    <span className="text-muted-foreground">
+                      {l.weightKg > 0
+                        ? `${fmtNum(l.weightKg, 3)} kg/${UNIT_LABELS[l.unit]} → ${fmtMoney(l.unitPrice)}/${UNIT_LABELS[l.unit]} · ${fmtNum(lineWeight(l))} kg`
+                        : `${fmtMoney(l.unitPrice)}/${UNIT_LABELS[l.unit]}`}
+                    </span>
+                    <span className="font-semibold">{fmtMoney(lineGross(l))}</span>
+                  </div>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <Field label={`Qty (${UNIT_LABELS[l.unit]})`}>
-                    <input inputMode="decimal" value={l.qty} onFocus={(e) => e.currentTarget.select()} onChange={(e) => patch(l.key, { qty: num(e.target.value) })} className={inputCls} />
-                  </Field>
-                  <Field label={`₹ / ${UNIT_LABELS[l.unit]}`}>
-                    <input inputMode="decimal" value={l.unitPrice || ""} placeholder="Enter price" onFocus={(e) => e.currentTarget.select()} onChange={(e) => patch(l.key, { unitPrice: num(e.target.value), priceEdited: true })} className={inputCls} />
-                  </Field>
-                </div>
-                <p className="mt-2 text-right text-sm font-semibold tabular-nums">{fmtMoney(lineGross(l))}</p>
-              </div>
-            ))}
-            <Button type="button" variant="outline" onClick={() => setSheet(true)} className="h-12 w-full rounded-xl border-dashed text-base">
-              <Plus className="mr-1 h-5 w-5" /> Add item
+              ))}
+            </div>
+
+            {/* desktop spreadsheet */}
+            <div className="hidden lg:block">
+              {lines.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                  Click a price in the catalog on the left to add it. Click again to add another
+                  roll.
+                </p>
+              ) : (
+                <table className="w-full tabular-nums">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="py-2 pr-2 font-semibold">Item</th>
+                      <th className="w-24 px-1 text-right font-semibold">Qty</th>
+                      <th className="w-20 px-1 text-right font-semibold">Kg</th>
+                      <th className="w-24 px-1 text-right font-semibold">₹/kg</th>
+                      <th className="w-24 px-1 text-right font-semibold">₹/unit</th>
+                      <th className="w-14 px-1 text-right font-semibold">GST</th>
+                      <th className="w-28 px-1 text-right font-semibold">Amount</th>
+                      <th className="w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {priced.map((l) => (
+                      <tr key={l.key} className="border-b border-border/60 align-middle">
+                        <td className="py-1.5 pr-2">
+                          <p className="text-sm font-medium leading-tight">{l.description}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {[
+                              CATEGORY_LABELS[l.category],
+                              rollHint(l),
+                              isNonIsiLine(l) && "Non-ISI",
+                              l.rateEdited && "₹/kg edited",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                        </td>
+                        <td className="px-1">
+                          <div className="flex items-center gap-1">
+                            {qtyIn(l, cell)}
+                            <span className="w-7 text-xs text-muted-foreground">
+                              {UNIT_LABELS[l.unit]}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-1 text-right text-sm">
+                          {l.weightKg > 0 ? fmtNum(lineWeight(l)) : "—"}
+                        </td>
+                        <td className="px-1">
+                          {l.weightKg > 0 ? (
+                            priceIn(l, cell)
+                          ) : (
+                            <span className="block text-right text-sm text-muted-foreground">
+                              —
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-1 text-right text-sm">
+                          {l.weightKg > 0 ? fmtNum(l.unitPrice) : priceIn(l, cell)}
+                        </td>
+                        <td className="px-1 text-right text-sm">{l.gstRate}%</td>
+                        <td className="px-1 text-right text-sm font-semibold">
+                          {fmtMoney(lineGross(l))}
+                        </td>
+                        <td className="pl-1 text-right">
+                          <button
+                            type="button"
+                            aria-label="Remove item"
+                            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                            onClick={() => removeLine(l.key)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {desktop && (
+              <AddItemSheet
+                inline
+                open={sheet}
+                onOpenChange={setSheet}
+                products={prods.data ?? []}
+                groups={pricing.data?.groups ?? []}
+                rateOf={rateOf}
+                onAdd={(l) => addLine(l)}
+              />
+            )}
+            <textarea
+              className="hidden w-full rounded-xl border border-input bg-background p-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 lg:block"
+              rows={2}
+              placeholder="Notes: delivery, validity, payment terms…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSheet(desktop ? !sheet : true)}
+              className="h-12 w-full rounded-xl border-dashed text-base lg:h-10 lg:text-sm"
+            >
+              <Plus className="mr-1 h-5 w-5" /> <span className="lg:hidden">Add item</span>
+              <span className="hidden lg:inline">
+                {sheet ? "Close custom item" : "Custom item, new size or custom length"}
+              </span>
             </Button>
           </Card>
 
-          <Card title="Tax & charges">
-            <label className="flex items-center justify-between">
-              <span className="text-sm font-medium">Rates include GST</span>
-              <Switch checked={inclusive} onCheckedChange={setInclusive} />
-            </label>
+          <Card title="Tax & charges" className="lg:hidden">
             <label className="flex items-center justify-between">
               <span className="text-sm font-medium">Inter-state supply (IGST)</span>
               <Switch checked={igst} onCheckedChange={setIgst} />
             </label>
             <Field label="Forwarding / extra charges ₹">
-              <input inputMode="decimal" value={extra} onChange={(e) => setExtra(e.target.value)} className={inputCls} />
+              <input
+                inputMode="decimal"
+                value={extra}
+                onChange={(e) => setExtra(e.target.value)}
+                className={inputCls}
+              />
             </Field>
-            <textarea className="min-h-20 w-full rounded-xl border border-input bg-background p-3 text-base outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" placeholder="Notes: delivery, validity, payment terms…" value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <textarea
+              className="min-h-20 w-full rounded-xl border border-input bg-background p-3 text-base outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              placeholder="Notes: delivery, validity, payment terms…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
           </Card>
         </div>
 
-        <aside className="hidden space-y-2 rounded-2xl border border-border bg-card p-5 md:sticky md:top-20 md:block">
-          <TotalsBlock totals={totals} igst={igst} />
-          <div className="pt-2 [&>button]:w-full">{saveBtn}</div>
-        </aside>
-        <div className="md:hidden">
-          <Card><TotalsBlock totals={totals} igst={igst} /></Card>
+        <div className="md:sticky md:top-20 md:col-start-2 md:row-start-2 lg:bottom-4 lg:top-auto lg:col-start-2 lg:row-start-3">
+          <Card className="lg:shadow-lg">
+            <div className="lg:hidden">
+              <TotalsBlock totals={totals} igst={igst} />
+              <div className="hidden pt-2 md:block [&>button]:w-full">{saveBtn}</div>
+            </div>
+            {/* desktop: one compact sticky bar */}
+            <div className="hidden items-center justify-between gap-6 tabular-nums lg:flex">
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+                <label className="flex items-center gap-2 font-medium text-foreground">
+                  IGST <Switch checked={igst} onCheckedChange={setIgst} />
+                </label>
+                <label className="flex items-center gap-2">
+                  Freight ₹
+                  <input
+                    inputMode="decimal"
+                    value={extra}
+                    onChange={(e) => setExtra(e.target.value)}
+                    placeholder="0"
+                    className="h-9 w-24 rounded-lg border border-input bg-background px-2 text-right text-sm text-foreground outline-none focus:border-primary"
+                  />
+                </label>
+                <span>
+                  {lines.length} items · {fmtNum(priced.reduce((s, l) => s + lineWeight(l), 0))} kg
+                </span>
+                <span>
+                  Taxable <b className="text-foreground">{fmtMoney(totals.taxable)}</b>
+                </span>
+                {igst ? (
+                  <span>
+                    IGST <b className="text-foreground">{fmtMoney(totals.igst)}</b>
+                  </span>
+                ) : (
+                  <span>
+                    CGST + SGST{" "}
+                    <b className="text-foreground">{fmtMoney(totals.cgst + totals.sgst)}</b>
+                  </span>
+                )}
+                {totals.roundOff !== 0 && <span>Round off {fmtMoney(totals.roundOff)}</span>}
+              </div>
+              <div className="flex items-center gap-4">
+                <span className="text-2xl font-bold">{fmtMoney(totals.total)}</span>
+                {saveBtn}
+              </div>
+            </div>
+          </Card>
         </div>
       </div>
 
-      <AddItemSheet
-        open={sheet}
-        onOpenChange={setSheet}
-        items={list.data?.items ?? []}
-        onAdd={(l) => { setLines((x) => [...x, { ...l, key: crypto.randomUUID(), priceEdited: false }]); toast.success("Added", { duration: 1000 }); }}
-      />
+      {!desktop && (
+        <AddItemSheet
+          open={sheet}
+          onOpenChange={setSheet}
+          products={prods.data ?? []}
+          groups={pricing.data?.groups ?? []}
+          rateOf={rateOf}
+          onAdd={(l) => addLine(l)}
+        />
+      )}
     </PageShell>
   );
 }
 
-function TotalsBlock({ totals, igst }: { totals: ReturnType<typeof computeTotals>; igst: boolean }) {
+// Desktop-only catalog: grade tabs, then a size × PN grid of ₹/m like the printed price list.
+function CatalogPanel({
+  products,
+  rateOf,
+  onPick,
+  onMore,
+  inQuote,
+}: {
+  products: Product[];
+  rateOf: (id: string | null) => number;
+  onPick: (p: Product) => void;
+  onMore: () => void;
+  inQuote: Set<string>;
+}) {
+  const [cat, setCat] = useState<Category>("pipe");
+  const [grade, setGrade] = useState("");
+  const [roll, setRoll] = useState("complete");
+  const pipes = products.filter((p) => p.category === "pipe");
+  const grades = uniq(pipes.map((p) => p.grade ?? ""));
+  const g = grades.includes(grade) ? grade : (grades[0] ?? "");
+  const rolls = uniq(pipes.filter((p) => p.grade === g).map((p) => p.roll ?? "complete"));
+  const r = rolls.includes(roll) ? roll : (rolls[0] ?? "complete");
+  const rows = pipes.filter((p) => p.grade === g && (p.roll ?? "complete") === r);
+  const sizes = uniq(rows.map((p) => p.size_mm ?? 0)).sort((a, b) => a - b);
+  const pns = uniq(rows.map((p) => p.pn ?? "")).sort((a, b) => pnNumber(a) - pnNumber(b));
+  const others = products.filter((p) => p.category === cat);
+  const unitPrice = (p: Product) => p.weight_kg * rateOf(p.rate_group_id);
+
+  return (
+    <Card title="Catalog · click to add">
+      <Chips<Category>
+        label="Category"
+        value={cat}
+        onChange={setCat}
+        options={(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
+          value: c,
+          label: CATEGORY_LABELS[c],
+        }))}
+      />
+      {cat === "pipe" ? (
+        <>
+          <Chips
+            label="Grade"
+            value={g}
+            onChange={setGrade}
+            options={grades.map((x) => ({
+              value: x,
+              label: x,
+              sub: `₹${fmtNum(rateOf(pipes.find((p) => p.grade === x)?.rate_group_id ?? x))}/kg`,
+            }))}
+          />
+          {rolls.length > 1 && (
+            <Chips
+              label="Supply"
+              value={r}
+              onChange={setRoll}
+              options={rolls.map((x) => ({ value: x, label: x === "cut" ? "Cut roll" : "Roll" }))}
+            />
+          )}
+          <table className="w-full tabular-nums">
+            <thead>
+              <tr className="text-xs text-muted-foreground">
+                <th className="py-1 text-left font-semibold">mm</th>
+                {pns.map((pn) => (
+                  <th key={pn} className="py-1 text-right font-semibold">
+                    {pn}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sizes.map((size) => (
+                <tr key={size} className="border-t border-border/60">
+                  <td className="py-1 pr-1 text-sm font-semibold">
+                    {size}
+                    <span className="block text-[10px] font-normal text-muted-foreground">
+                      {rows.find((p) => p.size_mm === size)?.inch}
+                    </span>
+                  </td>
+                  {pns.map((pn) => {
+                    const p = rows.find((x) => x.size_mm === size && x.pn === pn);
+                    return (
+                      <td key={pn} className="p-0.5 text-right">
+                        {p ? (
+                          <button
+                            type="button"
+                            onClick={() => onPick(p)}
+                            title={`${p.name} · ${fmtNum(p.weight_kg, 3)} kg/m`}
+                            className={`w-full rounded-md px-1.5 py-1.5 text-right text-sm font-semibold transition-colors hover:bg-primary hover:text-primary-foreground ${inQuote.has(p.id) ? "bg-primary/10 text-primary" : ""}`}
+                          >
+                            {fmtNum(unitPrice(p))}
+                          </button>
+                        ) : (
+                          <span className="block px-1.5 text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-muted-foreground">
+            ₹ per metre, ex-GST. Click adds one roll (
+            {r === "cut" ? "100 m for cut roll" : "first roll length"}).
+          </p>
+        </>
+      ) : (
+        <ul className="-my-1 divide-y divide-border/60">
+          {others.length === 0 && (
+            <li className="py-2 text-sm text-muted-foreground">
+              Nothing here yet. Add under Products.
+            </li>
+          )}
+          {others.map((p) => (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => onPick(p)}
+                className={`flex w-full items-center justify-between gap-2 rounded-md px-1 py-2 text-left hover:bg-secondary ${inQuote.has(p.id) ? "text-primary" : ""}`}
+              >
+                <span className="min-w-0 truncate text-sm font-medium">{p.name}</span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums">
+                  ₹{fmtNum(unitPrice(p))}/{UNIT_LABELS[p.unit as Unit]}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Button variant="ghost" className="h-9 w-full rounded-lg text-sm" onClick={onMore}>
+        Custom item, new size or custom length…
+      </Button>
+    </Card>
+  );
+}
+
+function TotalsBlock({
+  totals,
+  igst,
+}: {
+  totals: ReturnType<typeof computeTotals>;
+  igst: boolean;
+}) {
   const row = (k: string, v: number) => (
-    <div className="flex justify-between text-sm text-muted-foreground"><span>{k}</span><span className="tabular-nums text-foreground">{fmtMoney(v)}</span></div>
+    <div className="flex justify-between text-sm text-muted-foreground">
+      <span>{k}</span>
+      <span className="tabular-nums text-foreground">{fmtMoney(v)}</span>
+    </div>
   );
   return (
     <div className="space-y-1.5">
       {row("Taxable value", totals.taxable)}
-      {igst ? row("IGST", totals.igst) : (<>{row("CGST", totals.cgst)}{row("SGST", totals.sgst)}</>)}
+      {igst ? (
+        row("IGST", totals.igst)
+      ) : (
+        <>
+          {row("CGST", totals.cgst)}
+          {row("SGST", totals.sgst)}
+        </>
+      )}
       {totals.roundOff !== 0 && row("Round off", totals.roundOff)}
       <div className="flex items-baseline justify-between border-t border-border pt-2">
-        <span className="font-semibold">Total</span>
+        <span className="font-semibold">Total incl. GST</span>
         <span className="text-2xl font-bold tabular-nums">{fmtMoney(totals.total)}</span>
       </div>
     </div>
@@ -238,128 +973,630 @@ function TotalsBlock({ totals, igst }: { totals: ReturnType<typeof computeTotals
 }
 
 // Bottom sheet; stays open after "Add" so a whole enquiry can be keyed in without reopening.
-function AddItemSheet({ open, onOpenChange, items, onAdd }: { open: boolean; onOpenChange: (o: boolean) => void; items: Item[]; onAdd: (l: Line) => void }) {
+// Every chip row is derived from the product catalog, so adding a product adds its grade/size/PN/length.
+function AddItemSheet({
+  open,
+  onOpenChange,
+  products,
+  groups,
+  rateOf,
+  onAdd,
+  inline,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  products: Product[];
+  groups: { id: string; name: string }[];
+  rateOf: (id: string | null) => number;
+  onAdd: (l: Line) => void;
+  inline?: boolean; // desktop: render inside the items card instead of a sheet
+}) {
   const [cat, setCat] = useState<Category | "custom">("pipe");
-  // pipe picker
-  const pipes = useMemo(() => items.filter((p) => p.category === "pipe"), [items]);
+  const pipes = useMemo(() => products.filter((p) => p.category === "pipe"), [products]);
   const [grade, setGrade] = useState("");
   const [roll, setRoll] = useState("");
   const [size, setSize] = useState(0);
   const [pn, setPn] = useState("");
-  const [rollLen, setRollLen] = useState(0);
+  const [rollLen, setRollLen] = useState(-1); // -1 = first roll length, 0 = custom metres
   const [rolls, setRolls] = useState(1);
   const [metres, setMetres] = useState("100");
-  // list picker (sprinkler / fitting)
   const [pickId, setPickId] = useState("");
   const [pcs, setPcs] = useState(10);
-  const [price, setPrice] = useState(""); // only for products missing from the list
-  // custom
-  const [cu, setCu] = useState({ name: "", hsn: "3917 40 00", unit: "pc" as Unit, gst: 18, price: "", qty: "1" });
+  const [cu, setCu] = useState({
+    cat: "fitting" as Category,
+    name: "",
+    hsn: "3917 40 00",
+    unit: "pc" as Unit,
+    gst: 18,
+    weight: "",
+    card: "FITTING",
+    price: "",
+    qty: "1",
+    save: true,
+  });
+  // "+ New" size / PN: saved straight into the catalog so it's there next time.
+  const [np, setNp] = useState<null | {
+    size: string;
+    inch: string;
+    pn: string;
+    lens: string;
+    weight: string;
+  }>(null);
+  const qc = useQueryClient();
+  const refresh = () => qc.invalidateQueries({ queryKey: ["products"] });
 
-  // Each picker level only offers what exists below it; stale picks fall back to the first valid option.
+  // Each level only offers what exists below it; stale picks fall back to the first valid option.
   const grades = uniq(pipes.map((p) => p.grade ?? ""));
-  const g = grades.includes(grade) ? grade : grades[0] ?? "";
+  const g = grades.includes(grade) ? grade : (grades[0] ?? "");
   const rollsOpt = uniq(pipes.filter((p) => p.grade === g).map((p) => p.roll ?? "complete"));
-  const r = rollsOpt.includes(roll) ? roll : rollsOpt[0] ?? "";
-  const sizes = uniq(pipes.filter((p) => p.grade === g && (p.roll ?? "complete") === r).map((p) => p.size_mm ?? 0));
-  const s = sizes.includes(size) ? size : sizes[0] ?? 0;
-  const pnOpts = pipes.filter((p) => p.grade === g && (p.roll ?? "complete") === r && p.size_mm === s);
+  const r = rollsOpt.includes(roll) ? roll : (rollsOpt[0] ?? "");
+  const sizes = uniq(
+    pipes.filter((p) => p.grade === g && (p.roll ?? "complete") === r).map((p) => p.size_mm ?? 0),
+  ).sort((a, b) => a - b);
+  const s = sizes.includes(size) ? size : (sizes[0] ?? 0);
+  const pnOpts = pipes.filter(
+    (p) => p.grade === g && (p.roll ?? "complete") === r && p.size_mm === s,
+  );
   const pipe = pnOpts.find((p) => p.pn === pn) ?? pnOpts[0];
   const lens = (pipe?.roll_lengths ?? "").split("/").map(Number).filter(Boolean);
-  const len = lens.includes(rollLen) ? rollLen : lens[0] ?? 0;
+  // rollLen 0 = "Custom" metres; otherwise a roll length that exists for this pipe (falls back to the first).
+  const customLen = !lens.length || rollLen === 0;
+  const len = lens.includes(rollLen) ? rollLen : (lens[0] ?? 0);
 
-  const listItems = items.filter((p) => p.category === cat);
+  const groupFor = (grade: string) =>
+    groups.find((x) => x.id === grade)?.id ??
+    pipes.find((p) => p.grade === grade)?.rate_group_id ??
+    groups[0]?.id ??
+    "";
+  const isKg = (size: string, pnLabel: string) => {
+    const sdr = sdrFor(g, pnNumber(pnLabel));
+    return sdr && num(size) ? pipeKgPerM(num(size), sdr).toFixed(3) : "";
+  };
+  const openNewPipe = (from: "size" | "pn") =>
+    setNp({
+      size: from === "pn" ? String(s) : "",
+      inch: from === "pn" ? (pipe?.inch ?? "") : "",
+      pn: from === "size" ? (pipe?.pn ?? "PN 6") : "",
+      lens: pipe?.roll_lengths ?? "",
+      weight: from === "size" ? "" : "",
+    });
+
+  async function saveNewPipe() {
+    if (!np) return;
+    const size = Math.round(num(np.size));
+    const pnLabel = normalizePn(np.pn);
+    const weight = num(np.weight) || num(isKg(np.size, pnLabel));
+    if (!size || !pnLabel || weight <= 0) return void toast.error("Enter size, PN and weight");
+    if (
+      pipes.some(
+        (p) =>
+          p.grade === g && (p.roll ?? "complete") === r && p.size_mm === size && p.pn === pnLabel,
+      )
+    )
+      return void toast.error("That size and PN already exist");
+    try {
+      await saveProduct({
+        data: newPipe({
+          grade: g,
+          roll: r,
+          size,
+          inch: np.inch,
+          pn: pnLabel,
+          lens: np.lens,
+          weight,
+          groupId: groupFor(g),
+        }),
+      });
+      await refresh();
+      setSize(size);
+      setPn(pnLabel);
+      setNp(null);
+      toast.success("Saved to products");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message.slice(0, 140) : "Could not save");
+    }
+  }
+
+  async function saveRollLength() {
+    const m = Math.round(num(metres));
+    if (!pipe || m <= 0 || lens.includes(m)) return;
+    const next = [...lens, m].sort((a, b) => a - b).join("/");
+    // every PN of this size/grade shares the roll lengths
+    await Promise.all(
+      pnOpts.map((p) =>
+        saveProduct({
+          data: {
+            id: p.id,
+            category: "pipe",
+            rate_group_id: p.rate_group_id,
+            name: p.name,
+            grade: p.grade,
+            roll: p.roll,
+            pn: p.pn,
+            inch: p.inch,
+            roll_lengths: next,
+            hsn: p.hsn,
+            size_mm: p.size_mm,
+            unit: p.unit as Unit,
+            weight_kg: p.weight_kg,
+            gst_rate: p.gst_rate,
+            active: true,
+          },
+        }),
+      ),
+    );
+    await refresh();
+    setRollLen(m);
+    toast.success(`${m} m saved as a roll length`);
+  }
+
+  const listItems = products.filter((p) => p.category === cat);
   const picked = listItems.find((p) => p.id === pickId) ?? listItems[0];
-
   const sel = cat === "pipe" ? pipe : cat === "custom" ? undefined : picked;
-  const unitPrice = sel ? sel.price ?? num(price) : num(cu.price);
-  const qty = cat === "pipe" ? (len ? rolls * len : num(metres)) : cat === "custom" ? num(cu.qty) : pcs;
 
-  function add() {
+  const unitPriceOf = (p?: Product) => (p ? p.weight_kg * rateOf(p.rate_group_id) : 0);
+  const cuRate = cu.weight ? rateOf(cu.card) : 0;
+  const unitPrice = sel
+    ? unitPriceOf(sel)
+    : num(cu.weight) > 0
+      ? num(cu.weight) * cuRate
+      : num(cu.price);
+  const qty =
+    cat === "pipe" ? (customLen ? num(metres) : rolls * len) : cat === "custom" ? num(cu.qty) : pcs;
+  const unit = (sel?.unit ?? cu.unit) as Unit;
+
+  async function add() {
     if (cat === "custom") {
-      if (!cu.name.trim() || unitPrice <= 0 || qty <= 0) return void toast.error("Enter name, quantity and price");
-      onAdd({ productId: null, category: "fitting", description: cu.name.trim(), hsn: cu.hsn || null, unit: cu.unit, qty, unitPrice, gstRate: cu.gst });
-      setCu({ ...cu, name: "", price: "" });
+      if (!cu.name.trim() || unitPrice <= 0 || qty <= 0)
+        return void toast.error("Enter name, quantity and weight or price");
+      const w = num(cu.weight);
+      let productId: string | null = null;
+      if (cu.save && w > 0) {
+        try {
+          ({ id: productId } = await saveProduct({
+            data: {
+              category: cu.cat,
+              rate_group_id: cu.card,
+              name: cu.name.trim(),
+              grade: null,
+              roll: null,
+              pn: null,
+              inch: null,
+              roll_lengths: null,
+              hsn: cu.hsn || null,
+              size_mm: null,
+              unit: cu.unit,
+              weight_kg: w,
+              gst_rate: cu.gst,
+              active: true,
+            },
+          }));
+          await refresh();
+        } catch (e) {
+          return void toast.error(
+            e instanceof Error ? e.message.slice(0, 140) : "Could not save product",
+          );
+        }
+      }
+      onAdd({
+        productId,
+        rateGroupId: w > 0 ? cu.card : null,
+        category: cu.cat,
+        description: cu.name.trim(),
+        hsn: cu.hsn || null,
+        unit: cu.unit,
+        qty,
+        weightKg: w,
+        rateKg: w > 0 ? cuRate : 0,
+        unitPrice,
+        gstRate: cu.gst,
+      });
+      setCu({ ...cu, name: "", weight: "", price: "" });
       return;
     }
     if (!sel) return void toast.error("Pick a product");
-    if (unitPrice <= 0) return void toast.error("This product has no price in the selected list. Enter one.");
-    const desc = cat === "pipe" && len ? `${sel.name} · ${rolls} roll${rolls > 1 ? "s" : ""} × ${len} m` : sel.name;
-    onAdd({ productId: sel.id, category: sel.category as Category, description: desc, hsn: sel.hsn, unit: sel.unit as Unit, qty, unitPrice, gstRate: sel.gst_rate });
-    setPrice("");
+    if (qty <= 0) return void toast.error("Enter a quantity");
+    if (sel.weight_kg <= 0)
+      return void toast.error("This product has no weight. Set it under Products.");
+    const desc =
+      cat === "pipe" && !customLen
+        ? `${sel.name} · ${rolls} roll${rolls > 1 ? "s" : ""} × ${len} m`
+        : sel.name;
+    onAdd({
+      productId: sel.id,
+      rateGroupId: sel.rate_group_id,
+      category: sel.category as Category,
+      description: desc,
+      hsn: sel.hsn,
+      unit: sel.unit as Unit,
+      qty,
+      weightKg: sel.weight_kg,
+      rateKg: rateOf(sel.rate_group_id),
+      unitPrice,
+      gstRate: sel.gst_rate,
+    });
   }
 
-  const priceSub = (p?: Item) => (p?.price != null ? `₹${fmtNum(p.price)}` : "no price");
+  const perUnit = (p?: Product) =>
+    p ? `₹${fmtNum(unitPriceOf(p))}/${UNIT_LABELS[p.unit as Unit]}` : "";
 
+  const body = (
+    <>
+      <div className={inline ? "space-y-4" : "space-y-4 overflow-y-auto px-4 pb-2"}>
+        <Chips<Category | "custom">
+          label="Category"
+          value={cat}
+          onChange={setCat}
+          options={[
+            ...(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
+              value: c,
+              label: CATEGORY_LABELS[c],
+            })),
+            { value: "custom" as const, label: "Custom" },
+          ]}
+        />
+
+        {cat === "pipe" && (
+          <>
+            {!pipes.length && (
+              <p className="text-sm text-muted-foreground">
+                No pipes yet. Add them under Products.
+              </p>
+            )}
+            {grades.length > 1 && (
+              <Field label="Grade">
+                <Chips
+                  label="Grade"
+                  value={g}
+                  onChange={setGrade}
+                  options={grades.map((x) => ({
+                    value: x,
+                    label: x,
+                    sub: `₹${fmtNum(rateOf(x))}/kg`,
+                  }))}
+                />
+              </Field>
+            )}
+            {rollsOpt.length > 1 && (
+              <Field label="Supply">
+                <Chips
+                  label="Supply"
+                  value={r}
+                  onChange={setRoll}
+                  options={rollsOpt.map((x) => ({
+                    value: x,
+                    label: x === "cut" ? "Cut roll" : "Complete roll",
+                  }))}
+                />
+              </Field>
+            )}
+            <Field label="Size (mm)">
+              <Chips
+                label="Size"
+                value={np && !np.size ? -1 : s}
+                onChange={(x) => (x === -1 ? openNewPipe("size") : (setSize(x), setNp(null)))}
+                options={[
+                  ...sizes.map((x) => ({
+                    value: x,
+                    label: `${x}`,
+                    sub: pipes.find((p) => p.size_mm === x)?.inch ?? "mm",
+                  })),
+                  { value: -1, label: "+ New", sub: "size" },
+                ]}
+              />
+            </Field>
+            <Field label="Pressure class">
+              <Chips
+                label="Pressure class"
+                value={np && np.size ? "__new" : (pipe?.pn ?? "")}
+                onChange={(x) => (x === "__new" ? openNewPipe("pn") : (setPn(x), setNp(null)))}
+                options={[
+                  ...pnOpts.map((p) => ({
+                    value: p.pn ?? "",
+                    label: p.pn ?? "—",
+                    sub: perUnit(p),
+                  })),
+                  { value: "__new", label: "+ New", sub: "PN" },
+                ]}
+              />
+            </Field>
+            {np && (
+              <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-3">
+                <p className="text-sm font-semibold">
+                  New {g} {r === "cut" ? "cut roll" : "pipe"} · saved to products
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Size (mm)">
+                    <input
+                      inputMode="numeric"
+                      value={np.size}
+                      onChange={(e) => setNp({ ...np, size: e.target.value, weight: "" })}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Inch (optional)">
+                    <input
+                      value={np.inch}
+                      onChange={(e) => setNp({ ...np, inch: e.target.value })}
+                      placeholder='5"'
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Pressure class">
+                    <input
+                      value={np.pn}
+                      onChange={(e) => setNp({ ...np, pn: e.target.value, weight: "" })}
+                      placeholder="PN 6"
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label={`kg/m (IS 4984 ${isKg(np.size, np.pn) || "—"})`}>
+                    <input
+                      inputMode="decimal"
+                      value={np.weight}
+                      placeholder={isKg(np.size, np.pn)}
+                      onChange={(e) => setNp({ ...np, weight: e.target.value })}
+                      className={inputCls}
+                    />
+                  </Field>
+                  {r !== "cut" && (
+                    <div className="col-span-2">
+                      <Field label="Roll lengths (m)">
+                        <input
+                          value={np.lens}
+                          onChange={(e) => setNp({ ...np, lens: e.target.value })}
+                          placeholder="100/200"
+                          className={inputCls}
+                        />
+                      </Field>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" className="h-11 rounded-xl" onClick={() => setNp(null)}>
+                    Cancel
+                  </Button>
+                  <Button className="h-11 flex-1 rounded-xl font-semibold" onClick={saveNewPipe}>
+                    Save {g} {np.size || "?"} mm {np.pn || ""}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <Field label="Length">
+              <Chips
+                label="Roll length"
+                value={customLen ? 0 : len}
+                onChange={setRollLen}
+                options={[
+                  ...lens.map((x) => ({ value: x, label: `${x} m`, sub: "roll" })),
+                  { value: 0, label: "Custom", sub: "metres" },
+                ]}
+              />
+            </Field>
+            {customLen ? (
+              <Field label="Metres">
+                <div className="flex gap-2">
+                  <input
+                    inputMode="decimal"
+                    value={metres}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onChange={(e) => setMetres(e.target.value)}
+                    className={inputCls}
+                  />
+                  {pipe &&
+                    r !== "cut" &&
+                    num(metres) > 0 &&
+                    !lens.includes(Math.round(num(metres))) && (
+                      <Button
+                        variant="outline"
+                        className="h-12 shrink-0 rounded-xl"
+                        onClick={saveRollLength}
+                      >
+                        Save as roll
+                      </Button>
+                    )}
+                </div>
+              </Field>
+            ) : (
+              <Field label="Rolls">
+                <Stepper label="Rolls" value={rolls} onChange={setRolls} />
+              </Field>
+            )}
+          </>
+        )}
+
+        {(cat === "sprinkler" || cat === "fitting") && (
+          <>
+            {!listItems.length && (
+              <p className="text-sm text-muted-foreground">
+                No {CATEGORY_LABELS[cat].toLowerCase()} products yet. Add them under Products, or
+                use Custom.
+              </p>
+            )}
+            <div className="space-y-2" role="radiogroup" aria-label="Product">
+              {listItems.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={picked?.id === p.id}
+                  onClick={() => setPickId(p.id)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left ${picked?.id === p.id ? "border-primary bg-primary/5" : "border-border"}`}
+                >
+                  <span className="min-w-0">
+                    <span className="block font-medium">{shortName(p)}</span>
+                    <span className="block text-xs text-muted-foreground tabular-nums">
+                      {fmtNum(p.weight_kg, 3)} kg × ₹{fmtNum(rateOf(p.rate_group_id))}/kg
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums">{perUnit(p)}</span>
+                </button>
+              ))}
+            </div>
+            {!!listItems.length && (
+              <Field label={`Quantity (${UNIT_LABELS[(picked?.unit ?? "pc") as Unit]})`}>
+                <Stepper label="Quantity" value={pcs} onChange={setPcs} />
+              </Field>
+            )}
+          </>
+        )}
+
+        {cat === "custom" && (
+          <div className="space-y-3">
+            <Chips
+              label="Custom category"
+              value={cu.cat}
+              onChange={(c) =>
+                setCu({
+                  ...cu,
+                  cat: c,
+                  gst: c === "sprinkler" ? 5 : 18,
+                  card: c === "sprinkler" ? "SPRINKLER" : cu.card,
+                })
+              }
+              options={[
+                { value: "fitting" as Category, label: "Fitting" },
+                { value: "sprinkler" as Category, label: "Sprinkler" },
+                { value: "pipe" as Category, label: "Pipe / other" },
+              ]}
+            />
+            <Field label="Item name">
+              <input
+                value={cu.name}
+                onChange={(e) => setCu({ ...cu, name: e.target.value })}
+                placeholder="e.g. 110 mm Elbow 90°"
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Sold per">
+              <Chips<Unit>
+                label="Unit"
+                value={cu.unit}
+                onChange={(u) => setCu({ ...cu, unit: u })}
+                options={[
+                  { value: "pc", label: "Piece" },
+                  { value: "m", label: "Metre" },
+                  { value: "kg", label: "Kg" },
+                ]}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Quantity">
+                <input
+                  inputMode="decimal"
+                  value={cu.qty}
+                  onChange={(e) => setCu({ ...cu, qty: e.target.value })}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label={`Weight kg/${UNIT_LABELS[cu.unit]} (optional)`}>
+                <input
+                  inputMode="decimal"
+                  value={cu.weight}
+                  onChange={(e) => setCu({ ...cu, weight: e.target.value })}
+                  className={inputCls}
+                />
+              </Field>
+            </div>
+            {num(cu.weight) > 0 ? (
+              <Field label="Rate group">
+                <Chips
+                  label="Rate group"
+                  value={cu.card}
+                  onChange={(c) => setCu({ ...cu, card: c })}
+                  options={groups.map((c) => ({
+                    value: c.id,
+                    label: c.name,
+                    sub: `₹${fmtNum(rateOf(c.id))}/kg`,
+                  }))}
+                />
+              </Field>
+            ) : (
+              <Field label={`Price ₹/${UNIT_LABELS[cu.unit]} (ex-GST)`}>
+                <input
+                  inputMode="decimal"
+                  value={cu.price}
+                  onChange={(e) => setCu({ ...cu, price: e.target.value })}
+                  className={inputCls}
+                />
+              </Field>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="HSN">
+                <input
+                  value={cu.hsn}
+                  onChange={(e) => setCu({ ...cu, hsn: e.target.value })}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="GST">
+                <select
+                  className={inputCls}
+                  value={cu.gst}
+                  onChange={(e) => setCu({ ...cu, gst: +e.target.value })}
+                >
+                  {GST_OPTIONS.map((x) => (
+                    <option key={x} value={x}>
+                      {x}%
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            {num(cu.weight) > 0 ? (
+              <label className="flex items-center justify-between rounded-xl border border-border p-3">
+                <span className="text-sm font-medium">Save to products for next time</span>
+                <Switch checked={cu.save} onCheckedChange={(v) => setCu({ ...cu, save: v })} />
+              </label>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Fixed-price items are used on this quote only. Enter a weight to price by formula
+                and save it to products.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+      <div
+        className={
+          inline
+            ? "flex items-center gap-3 border-t border-border pt-3"
+            : "flex items-center gap-3 border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        }
+      >
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs text-muted-foreground tabular-nums">
+            {fmtNum(qty)} {UNIT_LABELS[unit]} × {fmtMoney(unitPrice)}/{UNIT_LABELS[unit]}
+          </p>
+          <p className="text-lg font-bold tabular-nums leading-tight">
+            {fmtMoney(qty * unitPrice)}
+            <span className="text-xs font-medium text-muted-foreground"> + GST</span>
+          </p>
+        </div>
+        <Button variant="outline" className="h-12 rounded-xl" onClick={() => onOpenChange(false)}>
+          Done
+        </Button>
+        <Button className="h-12 rounded-xl px-6 font-semibold" onClick={add}>
+          Add
+        </Button>
+      </div>
+    </>
+  );
+
+  if (inline)
+    return open ? (
+      <div className="space-y-4 rounded-xl border border-primary/40 bg-primary/5 p-4">
+        <p className="text-sm font-semibold">Custom item, new size or custom length</p>
+        {body}
+      </div>
+    ) : null;
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="max-h-[92dvh]">
-        <DrawerHeader className="pb-2 text-left"><DrawerTitle>Add item</DrawerTitle></DrawerHeader>
-        <div className="space-y-4 overflow-y-auto px-4 pb-2">
-          <Chips<Category | "custom"> label="Category" value={cat} onChange={setCat}
-            options={[...(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({ value: c, label: CATEGORY_LABELS[c] })), { value: "custom" as const, label: "Custom" }]} />
-
-          {cat === "pipe" && (
-            <>
-              {!pipes.length && <p className="text-sm text-muted-foreground">No pipes in the catalog yet.</p>}
-              {grades.length > 1 && <Field label="Grade"><Chips label="Grade" value={g} onChange={setGrade} options={grades.map((x) => ({ value: x, label: x }))} /></Field>}
-              {rollsOpt.length > 1 && <Field label="Supply"><Chips label="Supply" value={r} onChange={setRoll} options={rollsOpt.map((x) => ({ value: x, label: x === "cut" ? "Cut roll" : "Complete roll" }))} /></Field>}
-              <Field label="Size"><Chips label="Size" value={s} onChange={setSize} options={sizes.map((x) => ({ value: x, label: `${x}`, sub: "mm" }))} /></Field>
-              <Field label="Pressure class"><Chips label="Pressure class" value={pipe?.pn ?? ""} onChange={setPn} options={pnOpts.map((p) => ({ value: p.pn ?? "", label: p.pn ?? "—", sub: priceSub(p) }))} /></Field>
-              {lens.length ? (
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Roll length"><Chips label="Roll length" value={len} onChange={setRollLen} options={lens.map((x) => ({ value: x, label: `${x} m` }))} /></Field>
-                  <Field label="Rolls"><Stepper label="Rolls" value={rolls} onChange={setRolls} /></Field>
-                </div>
-              ) : (
-                <Field label="Metres"><input inputMode="decimal" value={metres} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setMetres(e.target.value)} className={inputCls} /></Field>
-              )}
-            </>
-          )}
-
-          {(cat === "sprinkler" || cat === "fitting") && (
-            <>
-              {!listItems.length && <p className="text-sm text-muted-foreground">No {CATEGORY_LABELS[cat].toLowerCase()} products yet. Add them under Prices, or use Custom.</p>}
-              <div className="space-y-2" role="radiogroup" aria-label="Product">
-                {listItems.map((p) => (
-                  <button key={p.id} type="button" role="radio" aria-checked={picked?.id === p.id} onClick={() => setPickId(p.id)}
-                    className={`flex w-full items-center justify-between rounded-xl border p-3 text-left ${picked?.id === p.id ? "border-primary bg-primary/5" : "border-border"}`}>
-                    <span className="font-medium">{shortName(p)}</span>
-                    <span className="shrink-0 pl-3 text-sm font-semibold tabular-nums">{priceSub(p)}</span>
-                  </button>
-                ))}
-              </div>
-              {!!listItems.length && <Field label={`Quantity (${UNIT_LABELS[(picked?.unit ?? "pc") as Unit]})`}><Stepper label="Quantity" value={pcs} onChange={setPcs} /></Field>}
-            </>
-          )}
-
-          {sel && sel.price == null && (
-            <Field label="Price (not in this list)"><input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} className={inputCls} /></Field>
-          )}
-
-          {cat === "custom" && (
-            <div className="space-y-3">
-              <Field label="Item name"><input value={cu.name} onChange={(e) => setCu({ ...cu, name: e.target.value })} placeholder="e.g. 110 mm Elbow 90°" className={inputCls} /></Field>
-              <Field label="Unit"><Chips<Unit> label="Unit" value={cu.unit} onChange={(u) => setCu({ ...cu, unit: u })} options={[{ value: "pc", label: "Piece" }, { value: "m", label: "Metre" }, { value: "kg", label: "Kg" }]} /></Field>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Quantity"><input inputMode="decimal" value={cu.qty} onChange={(e) => setCu({ ...cu, qty: e.target.value })} className={inputCls} /></Field>
-                <Field label={`₹ / ${UNIT_LABELS[cu.unit]}`}><input inputMode="decimal" value={cu.price} onChange={(e) => setCu({ ...cu, price: e.target.value })} className={inputCls} /></Field>
-                <Field label="HSN"><input value={cu.hsn} onChange={(e) => setCu({ ...cu, hsn: e.target.value })} className={inputCls} /></Field>
-                <Field label="GST">
-                  <select className={inputCls} value={cu.gst} onChange={(e) => setCu({ ...cu, gst: +e.target.value })}>{GST_OPTIONS.map((x) => <option key={x} value={x}>{x}%</option>)}</select>
-                </Field>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-3 border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs text-muted-foreground tabular-nums">{fmtNum(qty)} {UNIT_LABELS[(sel?.unit ?? cu.unit) as Unit]} × {fmtMoney(unitPrice)}</p>
-            <p className="text-lg font-bold tabular-nums leading-tight">{fmtMoney(qty * unitPrice)}</p>
-          </div>
-          <Button variant="outline" className="h-12 rounded-xl" onClick={() => onOpenChange(false)}>Done</Button>
-          <Button className="h-12 rounded-xl px-6 font-semibold" onClick={add}>Add</Button>
-        </div>
+        <DrawerHeader className="pb-2 text-left">
+          <DrawerTitle>Add item</DrawerTitle>
+        </DrawerHeader>
+        {body}
       </DrawerContent>
     </Drawer>
   );

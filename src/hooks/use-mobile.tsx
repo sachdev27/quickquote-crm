@@ -17,3 +17,16 @@ export function useIsMobile() {
 
   return !!isMobile;
 }
+
+// Desktop = the lg breakpoint (1024px), where screens switch to multi-pane layouts and centred dialogs.
+export function useIsDesktop() {
+  return React.useSyncExternalStore(
+    (cb) => {
+      const mql = window.matchMedia("(min-width: 1024px)");
+      mql.addEventListener("change", cb);
+      return () => mql.removeEventListener("change", cb);
+    },
+    () => window.matchMedia("(min-width: 1024px)").matches,
+    () => false,
+  );
+}

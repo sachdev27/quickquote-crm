@@ -1,8 +1,14 @@
 import { integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // Column keys are snake_case on purpose: rows go to the UI as-is. Mirrors migrations/0000_init.sql.
-const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
-const now = () => text("created_at").notNull().$defaultFn(() => new Date().toISOString());
+const id = () =>
+  text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID());
+const now = () =>
+  text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString());
 
 export const brands = sqliteTable("brands", {
   id: id(),
@@ -18,6 +24,7 @@ export const brands = sqliteTable("brands", {
   bank_ifsc: text("bank_ifsc"),
   upi_id: text("upi_id"),
   terms: text("terms"),
+  default_preset_id: text("default_preset_id"),
   created_at: now(),
 });
 
@@ -31,9 +38,46 @@ export const customers = sqliteTable("customers", {
   created_at: now(),
 });
 
+export const rate_groups = sqliteTable("rate_groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  sort: integer("sort").notNull().default(0),
+});
+
+export const rate_presets = sqliteTable("rate_presets", {
+  id: id(),
+  name: text("name").notNull(),
+  sort: integer("sort").notNull().default(0),
+});
+
+export const rate_profiles = sqliteTable("rate_profiles", {
+  id: id(),
+  name: text("name").notNull(),
+  active: integer("active").notNull().default(0),
+  sort: integer("sort").notNull().default(0),
+  created_at: now(),
+});
+
+export const rates = sqliteTable(
+  "rates",
+  {
+    profile_id: text("profile_id").notNull(),
+    preset_id: text("preset_id").notNull(),
+    group_id: text("group_id").notNull(),
+    raw_kg: real("raw_kg").notNull().default(0),
+    raw_kg_non_isi: real("raw_kg_non_isi"),
+    production_kg: real("production_kg").notNull().default(0),
+    transport_kg: real("transport_kg").notNull().default(0),
+    margin: real("margin").notNull().default(0),
+    margin_is_pct: integer("margin_is_pct").notNull().default(1),
+  },
+  (t) => [primaryKey({ columns: [t.profile_id, t.preset_id, t.group_id] })],
+);
+
 export const products = sqliteTable("products", {
   id: id(),
   category: text("category").notNull(),
+  rate_group_id: text("rate_group_id").notNull(),
   name: text("name").notNull(),
   grade: text("grade"),
   roll: text("roll"),
@@ -42,28 +86,23 @@ export const products = sqliteTable("products", {
   pn: text("pn"),
   roll_lengths: text("roll_lengths"),
   unit: text("unit").notNull().default("m"),
+  weight_kg: real("weight_kg").notNull().default(0),
   gst_rate: real("gst_rate").notNull().default(18),
   hsn: text("hsn"),
   sort: integer("sort").notNull().default(0),
   active: integer("active").notNull().default(1),
 });
 
-export const price_lists = sqliteTable("price_lists", {
-  id: id(),
-  name: text("name").notNull(),
-  wef: text("wef"),
-  prices_include_gst: integer("prices_include_gst").notNull().default(1),
-  created_at: now(),
-});
-
-export const prices = sqliteTable(
-  "prices",
+export const brand_raw = sqliteTable(
+  "brand_raw",
   {
-    price_list_id: text("price_list_id").notNull(),
-    product_id: text("product_id").notNull(),
-    price: real("price").notNull(),
+    profile_id: text("profile_id").notNull(),
+    brand_id: text("brand_id").notNull(),
+    group_id: text("group_id").notNull(),
+    raw_kg: real("raw_kg").notNull(),
+    raw_kg_non_isi: real("raw_kg_non_isi"),
   },
-  (t) => [primaryKey({ columns: [t.price_list_id, t.product_id] })]
+  (t) => [primaryKey({ columns: [t.profile_id, t.brand_id, t.group_id] })],
 );
 
 export const quotes = sqliteTable("quotes", {
@@ -71,16 +110,19 @@ export const quotes = sqliteTable("quotes", {
   quote_no: text("quote_no").notNull().unique(),
   brand_id: text("brand_id").notNull(),
   customer_id: text("customer_id"),
-  price_list_id: text("price_list_id"),
+  preset_id: text("preset_id"),
+  profile_id: text("profile_id"),
+  non_isi: integer("non_isi").notNull().default(0),
   quote_date: text("quote_date").notNull(),
   status: text("status").notNull().default("draft"),
-  prices_include_gst: integer("prices_include_gst").notNull().default(1),
   igst: integer("igst").notNull().default(0),
   extra_charges: real("extra_charges").notNull().default(0),
   notes: text("notes"),
   created_by: text("created_by"),
   created_at: now(),
-  updated_at: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updated_at: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
 });
 
 export const quote_items = sqliteTable("quote_items", {
@@ -93,6 +135,8 @@ export const quote_items = sqliteTable("quote_items", {
   hsn: text("hsn"),
   unit: text("unit").notNull().default("m"),
   qty: real("qty").notNull(),
+  weight_kg: real("weight_kg").notNull().default(0),
+  rate_kg: real("rate_kg").notNull().default(0),
   unit_price: real("unit_price").notNull(),
   gst_rate: real("gst_rate").notNull().default(18),
 });

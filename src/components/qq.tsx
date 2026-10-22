@@ -3,12 +3,29 @@ import { cn } from "@/lib/utils";
 
 // Phone-first primitives: ≥44px tap targets, numeric keypads, no tiny controls.
 
-export function Card({ title, aside, children, className }: { title?: string; aside?: React.ReactNode; children: React.ReactNode; className?: string }) {
+export function Card({
+  title,
+  aside,
+  children,
+  className,
+}: {
+  title?: string;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <section className={cn("rounded-2xl border border-border bg-card p-4 shadow-[0_1px_0_rgb(0_0_0/0.02)]", className)}>
+    <section
+      className={cn(
+        "rounded-2xl border border-border bg-card p-4 shadow-[0_1px_0_rgb(0_0_0/0.02)]",
+        className,
+      )}
+    >
       {(title || aside) && (
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {title}
+          </h2>
           {aside}
         </div>
       )}
@@ -41,7 +58,11 @@ export function Chips<T extends string | number>({
   label: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0"
+    >
       {options.map((o) => {
         const on = o.value === value;
         return (
@@ -53,11 +74,22 @@ export function Chips<T extends string | number>({
             onClick={() => onChange(o.value)}
             className={cn(
               "flex h-12 shrink-0 snap-start touch-manipulation flex-col items-center justify-center rounded-xl border px-4 text-sm font-semibold transition-colors",
-              on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-foreground active:bg-secondary"
+              on
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-background text-foreground active:bg-secondary",
             )}
           >
             <span className="tabular-nums leading-tight">{o.label}</span>
-            {o.sub && <span className={cn("text-[10px] font-normal leading-tight", on ? "text-primary-foreground/80" : "text-muted-foreground")}>{o.sub}</span>}
+            {o.sub && (
+              <span
+                className={cn(
+                  "text-[10px] font-normal leading-tight",
+                  on ? "text-primary-foreground/80" : "text-muted-foreground",
+                )}
+              >
+                {o.sub}
+              </span>
+            )}
           </button>
         );
       })}
@@ -65,9 +97,20 @@ export function Chips<T extends string | number>({
   );
 }
 
-export function Stepper({ value, onChange, min = 1, label }: { value: number; onChange: (n: number) => void; min?: number; label: string }) {
+export function Stepper({
+  value,
+  onChange,
+  min = 1,
+  label,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  min?: number;
+  label: string;
+}) {
   const set = (n: number) => onChange(Math.max(min, Math.round(n) || min));
-  const btn = "flex h-12 w-12 shrink-0 touch-manipulation items-center justify-center rounded-xl border border-border bg-background active:bg-secondary";
+  const btn =
+    "flex h-12 w-12 shrink-0 touch-manipulation items-center justify-center rounded-xl border border-border bg-background active:bg-secondary";
   return (
     <div className="flex items-center gap-2" role="group" aria-label={label}>
       <button type="button" aria-label="Decrease" className={btn} onClick={() => set(value - 1)}>
@@ -95,5 +138,9 @@ const STATUS_STYLE: Record<string, string> = {
   lost: "bg-rose-100 text-rose-800",
 };
 export function StatusPill({ status, label }: { status: string; label: string }) {
-  return <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold", STATUS_STYLE[status])}>{label}</span>;
+  return (
+    <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold", STATUS_STYLE[status])}>
+      {label}
+    </span>
+  );
 }

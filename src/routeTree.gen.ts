@@ -14,7 +14,8 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedNewQuoteRouteImport } from './routes/_authenticated/new-quote'
-import { Route as AuthenticatedPricesRouteImport } from './routes/_authenticated/prices'
+import { Route as AuthenticatedPriceListRouteImport } from './routes/_authenticated/price-list'
+import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedQuotesIdRouteImport } from './routes/_authenticated/quotes.$id'
 
@@ -42,9 +43,14 @@ const AuthenticatedNewQuoteRoute = AuthenticatedNewQuoteRouteImport.update({
   path: '/new-quote',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedPricesRoute = AuthenticatedPricesRouteImport.update({
-  id: '/prices',
-  path: '/prices',
+const AuthenticatedPriceListRoute = AuthenticatedPriceListRouteImport.update({
+  id: '/price-list',
+  path: '/price-list',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedProductsRoute = AuthenticatedProductsRouteImport.update({
+  id: '/products',
+  path: '/products',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
@@ -63,7 +69,8 @@ export interface FileRoutesByFullPath {
   '/customers': typeof AuthenticatedCustomersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/new-quote': typeof AuthenticatedNewQuoteRoute
-  '/prices': typeof AuthenticatedPricesRoute
+  '/price-list': typeof AuthenticatedPriceListRoute
+  '/products': typeof AuthenticatedProductsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/quotes/$id': typeof AuthenticatedQuotesIdRoute
 }
@@ -72,7 +79,8 @@ export interface FileRoutesByTo {
   '/customers': typeof AuthenticatedCustomersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/new-quote': typeof AuthenticatedNewQuoteRoute
-  '/prices': typeof AuthenticatedPricesRoute
+  '/price-list': typeof AuthenticatedPriceListRoute
+  '/products': typeof AuthenticatedProductsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/quotes/$id': typeof AuthenticatedQuotesIdRoute
 }
@@ -83,7 +91,8 @@ export interface FileRoutesById {
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/new-quote': typeof AuthenticatedNewQuoteRoute
-  '/_authenticated/prices': typeof AuthenticatedPricesRoute
+  '/_authenticated/price-list': typeof AuthenticatedPriceListRoute
+  '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/quotes/$id': typeof AuthenticatedQuotesIdRoute
 }
@@ -94,7 +103,8 @@ export interface FileRouteTypes {
     | '/customers'
     | '/dashboard'
     | '/new-quote'
-    | '/prices'
+    | '/price-list'
+    | '/products'
     | '/settings'
     | '/quotes/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -103,7 +113,8 @@ export interface FileRouteTypes {
     | '/customers'
     | '/dashboard'
     | '/new-quote'
-    | '/prices'
+    | '/price-list'
+    | '/products'
     | '/settings'
     | '/quotes/$id'
   id:
@@ -113,7 +124,8 @@ export interface FileRouteTypes {
     | '/_authenticated/customers'
     | '/_authenticated/dashboard'
     | '/_authenticated/new-quote'
-    | '/_authenticated/prices'
+    | '/_authenticated/price-list'
+    | '/_authenticated/products'
     | '/_authenticated/settings'
     | '/_authenticated/quotes/$id'
   fileRoutesById: FileRoutesById
@@ -160,11 +172,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedNewQuoteRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/prices': {
-      id: '/_authenticated/prices'
-      path: '/prices'
-      fullPath: '/prices'
-      preLoaderRoute: typeof AuthenticatedPricesRouteImport
+    '/_authenticated/price-list': {
+      id: '/_authenticated/price-list'
+      path: '/price-list'
+      fullPath: '/price-list'
+      preLoaderRoute: typeof AuthenticatedPriceListRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/products': {
+      id: '/_authenticated/products'
+      path: '/products'
+      fullPath: '/products'
+      preLoaderRoute: typeof AuthenticatedProductsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/settings': {
@@ -188,7 +207,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedNewQuoteRoute: typeof AuthenticatedNewQuoteRoute
-  AuthenticatedPricesRoute: typeof AuthenticatedPricesRoute
+  AuthenticatedPriceListRoute: typeof AuthenticatedPriceListRoute
+  AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedQuotesIdRoute: typeof AuthenticatedQuotesIdRoute
 }
@@ -197,7 +217,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedNewQuoteRoute: AuthenticatedNewQuoteRoute,
-  AuthenticatedPricesRoute: AuthenticatedPricesRoute,
+  AuthenticatedPriceListRoute: AuthenticatedPriceListRoute,
+  AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedQuotesIdRoute: AuthenticatedQuotesIdRoute,
 }

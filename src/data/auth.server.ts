@@ -10,7 +10,8 @@ let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 async function currentUser(): Promise<string> {
   if (import.meta.env.DEV) return "dev@local";
   const { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: aud } = await getEnv();
-  if (!team || !aud) throw new Error("Cloudflare Access is not configured (ACCESS_TEAM_DOMAIN / ACCESS_AUD)");
+  if (!team || !aud)
+    throw new Error("Cloudflare Access is not configured (ACCESS_TEAM_DOMAIN / ACCESS_AUD)");
   const token = getRequest().headers.get("cf-access-jwt-assertion");
   if (!token) throw new Response("Unauthorized", { status: 401 });
   jwks ??= createRemoteJWKSet(new URL(`https://${team}/cdn-cgi/access/certs`));

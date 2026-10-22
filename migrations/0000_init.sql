@@ -26,10 +26,37 @@ create table customers (
   created_at text not null default (datetime('now'))
 );
 
--- Product catalog. Prices live in price lists, so one catalog serves every list.
+-- Pricing engine. ₹/kg = raw + production + transport + margin, kept per rate group (grade) for each
+-- named preset (e.g. Standard / Dealer / Project). A quote picks a preset; its rates stay editable per quote.
+create table rate_groups (
+  id text primary key,                 -- e.g. PE63, SPRINKLER; products point here
+  name text not null,
+  sort integer not null default 0
+);
+
+create table rate_presets (
+  id text primary key,
+  name text not null,
+  sort integer not null default 0
+);
+
+create table rates (
+  preset_id text not null references rate_presets(id) on delete cascade,
+  group_id text not null references rate_groups(id) on delete cascade,
+  raw_kg real not null default 0,
+  production_kg real not null default 0,
+  transport_kg real not null default 0,
+  margin real not null default 0,
+  margin_is_pct integer not null default 1,  -- 1 = margin % on cost, 0 = flat ₹/kg
+  primary key (preset_id, group_id)
+);
+
+-- Product catalog. Price = weight × the group's ₹/kg; grades, sizes, PN and roll lengths in the
+-- quote picker are all derived from these rows, so adding a product adds its chips.
 create table products (
   id text primary key,
   category text not null check (category in ('pipe','sprinkler','fitting')),
+  rate_group_id text not null references rate_groups(id),
   name text not null,
   grade text,                          -- PE63 / PE80 / PE100
   roll text,                           -- complete / cut
@@ -38,26 +65,11 @@ create table products (
   pn text,
   roll_lengths text,                   -- "300/500" metres per roll
   unit text not null default 'm' check (unit in ('m','pc','kg')),
+  weight_kg real not null default 0,   -- kg per unit (per metre for pipe, per piece otherwise)
   gst_rate real not null default 18,
   hsn text,
   sort integer not null default 0,
   active integer not null default 1
-);
-
--- Several price lists (dealer, retail, project, by date...). Quotes pre-fill from the chosen one.
-create table price_lists (
-  id text primary key,
-  name text not null,
-  wef text,                            -- with effect from (date)
-  prices_include_gst integer not null default 1,
-  created_at text not null default (datetime('now'))
-);
-
-create table prices (
-  price_list_id text not null references price_lists(id) on delete cascade,
-  product_id text not null references products(id) on delete cascade,
-  price real not null,
-  primary key (price_list_id, product_id)
 );
 
 create table quotes (
@@ -66,9 +78,8 @@ create table quotes (
   brand_id text not null references brands(id),
   customer_id text references customers(id) on delete set null,
   quote_date text not null default (date('now')),
-  price_list_id text references price_lists(id) on delete set null,
+  preset_id text,
   status text not null default 'draft' check (status in ('draft','sent','won','lost')),
-  prices_include_gst integer not null default 1,
   igst integer not null default 0,     -- 1 = inter-state supply (IGST), else CGST+SGST
   extra_charges real not null default 0,
   notes text,
@@ -87,7 +98,9 @@ create table quote_items (
   hsn text,
   unit text not null default 'm',
   qty real not null,
-  unit_price real not null,
+  weight_kg real not null default 0,   -- per unit, snapshot
+  rate_kg real not null default 0,     -- ₹/kg used, snapshot
+  unit_price real not null,            -- ₹ per unit ex-GST (= weight × rate, or typed for custom)
   gst_rate real not null default 18
 );
 

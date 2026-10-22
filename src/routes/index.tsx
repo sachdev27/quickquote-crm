@@ -10,7 +10,10 @@ export const Route = createFileRoute("/")({
         content:
           "Create professional proforma quotations for HDPE pipes in under a minute — rate calculation with GST, customer CRM, PDF and WhatsApp sharing.",
       },
-      { property: "og:title", content: "Tarko CRM — Quick Quotes for HDPE Pipe, Sprinklers & Fittings" },
+      {
+        property: "og:title",
+        content: "Tarko CRM — Quick Quotes for HDPE Pipe, Sprinklers & Fittings",
+      },
       {
         property: "og:description",
         content:

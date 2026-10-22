@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 const LINKS = [
   { to: "/dashboard", label: "Quotes", Icon: LayoutList },
   { to: "/customers", label: "Customers", Icon: Users },
-  { to: "/prices", label: "Prices", Icon: Tag },
-  { to: "/settings", label: "Brands", Icon: Settings },
+  { to: "/products", label: "Products", Icon: Tag },
+  { to: "/settings", label: "Settings", Icon: Settings },
 ] as const;
 
 function useActive() {
@@ -20,7 +20,7 @@ export function BottomNav() {
   const item = (on: boolean) =>
     cn(
       "flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-medium transition-colors",
-      on ? "text-primary" : "text-muted-foreground hover:text-foreground"
+      on ? "text-primary" : "text-muted-foreground hover:text-foreground",
     );
   return (
     <nav className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur md:hidden">
@@ -39,63 +39,109 @@ export function BottomNav() {
           </span>
           <span className="-mt-1">New quote</span>
         </Link>
-        <Link to="/prices" className={item(active("/prices"))}>
+        <Link to="/products" className={item(active("/products"))}>
           <Tag className="h-5 w-5" />
-          Prices
+          Products
         </Link>
         <Link to="/settings" className={item(active("/settings"))}>
           <Settings className="h-5 w-5" />
-          Brands
+          Settings
         </Link>
       </div>
     </nav>
   );
 }
 
+// Phone: top title bar + bottom tabs. Tablet (md): top nav. Desktop (lg): fixed left sidebar and
+// full-width content, so tables and multi-pane screens can use the whole screen.
 export function PageShell({
   title,
   actions,
   bar,
+  wide,
   children,
 }: {
   title: string;
-  actions?: React.ReactNode;
+  actions?: React.ReactNode; // right side of the title bar (all sizes)
   bar?: React.ReactNode; // sticky action bar above the mobile tab bar
-
+  wide?: boolean; // use the full desktop width (tables, multi-pane)
   children: React.ReactNode;
 }) {
   const active = useActive();
+  const navLink = (to: string, on: boolean) =>
+    cn(
+      "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium",
+      on
+        ? "bg-secondary text-primary"
+        : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+    );
   return (
     <div className="min-h-screen bg-background">
-      <header className="no-print sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between gap-4 px-4 py-3 md:max-w-5xl">
-          <h1 className="text-lg font-bold text-foreground">{title}</h1>
-          <nav className="hidden items-center gap-1 md:flex">
-            {LINKS.map(({ to, label, Icon }) => (
+      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-20 flex-col items-center gap-1 border-r border-border bg-card py-3 lg:flex">
+        <p className="pb-2 text-sm font-bold leading-tight">
+          Tarko<span className="block text-center text-primary">CRM</span>
+        </p>
+        <Link
+          to="/new-quote"
+          title="New quote"
+          className="mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm"
+        >
+          <Plus className="h-5 w-5" />
+        </Link>
+        {LINKS.map(({ to, label, Icon }) => (
+          <Link
+            key={to}
+            to={to}
+            className={cn(
+              "flex w-16 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium",
+              active(to)
+                ? "bg-secondary text-primary"
+                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+            )}
+          >
+            <Icon className="h-5 w-5" />
+            {label}
+          </Link>
+        ))}
+      </aside>
+
+      <div className="lg:pl-20 print:!pl-0">
+        <header className="no-print sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
+          <div
+            className={cn(
+              "mx-auto flex w-full max-w-md items-center justify-between gap-4 px-4 py-3 md:max-w-5xl",
+              wide && "lg:max-w-none lg:px-8",
+            )}
+          >
+            <h1 className="text-lg font-bold text-foreground">{title}</h1>
+            <nav className="hidden items-center gap-1 md:flex lg:hidden">
+              {LINKS.map(({ to, label, Icon }) => (
+                <Link key={to} to={to} className={navLink(to, active(to))}>
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </Link>
+              ))}
               <Link
-                key={to}
-                to={to}
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium",
-                  active(to) ? "bg-secondary text-primary" : "text-muted-foreground hover:text-foreground"
-                )}
+                to="/new-quote"
+                className="ml-2 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground"
               >
-                <Icon className="h-4 w-4" />
-                {label}
+                <Plus className="h-4 w-4" />
+                New quote
               </Link>
-            ))}
-            <Link
-              to="/new-quote"
-              className="ml-2 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground"
-            >
-              <Plus className="h-4 w-4" />
-              New quote
-            </Link>
-          </nav>
-          {actions && <div className="md:hidden">{actions}</div>}
-        </div>
-      </header>
-      <main className={cn("mx-auto w-full max-w-md px-4 pt-4 md:max-w-5xl md:pb-10", bar ? "pb-44" : "pb-28")}>{children}</main>
+            </nav>
+            {actions && <div className="flex items-center gap-2 md:hidden lg:flex">{actions}</div>}
+          </div>
+        </header>
+        <main
+          className={cn(
+            "mx-auto w-full max-w-md px-4 pt-4 md:max-w-5xl md:pb-10",
+            bar ? "pb-44" : "pb-28",
+            wide && "lg:max-w-none lg:px-8 lg:pt-6",
+          )}
+        >
+          {children}
+        </main>
+      </div>
       {bar && (
         <div className="no-print fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 border-t border-border bg-card/95 backdrop-blur md:hidden">
           <div className="mx-auto max-w-md px-4 py-2">{bar}</div>

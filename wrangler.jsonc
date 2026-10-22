@@ -5,8 +5,13 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
   "d1_databases": [
-    { "binding": "DB", "database_name": "tarko-crm", "database_id": "REPLACE_WITH_D1_DATABASE_ID", "migrations_dir": "migrations" }
+    {
+      "binding": "DB",
+      "database_name": "tarko-crm",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations",
+    },
   ],
   // Cloudflare Zero Trust > Access > Applications: protect this hostname, then fill these in.
-  "vars": { "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" }
+  "vars": { "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" },
 }

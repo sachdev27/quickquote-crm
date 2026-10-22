@@ -80,10 +80,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "PipeQuote — HDPE Quotation & CRM" },
-      { name: "description", content: "Create proforma quotations for HDPE pipe with automatic rate calculation, customer CRM and WhatsApp sharing." },
+      {
+        name: "description",
+        content:
+          "Create proforma quotations for HDPE pipe with automatic rate calculation, customer CRM and WhatsApp sharing.",
+      },
       { name: "author", content: "PipeQuote" },
       { property: "og:title", content: "PipeQuote — HDPE Quotation & CRM" },
-      { property: "og:description", content: "Create proforma quotations for HDPE pipe with automatic rate calculation, customer CRM and WhatsApp sharing." },
+      {
+        property: "og:description",
+        content:
+          "Create proforma quotations for HDPE pipe with automatic rate calculation, customer CRM and WhatsApp sharing.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],

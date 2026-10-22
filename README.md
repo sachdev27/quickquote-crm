@@ -15,6 +15,7 @@ Applies migrations to a local D1 (`.wrangler/state`) and starts the dev server a
 ## Deploy
 
 One-time setup:
+
 1. `npx wrangler login`
 2. `npx wrangler d1 create tarko-crm` and paste the `database_id` into `wrangler.jsonc`
 3. Cloudflare Zero Trust → Access → Applications: protect the app's hostname, then put the team domain and AUD tag in `wrangler.jsonc` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`)
@@ -33,11 +34,7 @@ Applies pending D1 migrations, builds, and deploys the Worker.
 
 Rate Calculate
 
-
-
 all plus
-
-
 
 raw material price
 
@@ -47,16 +44,11 @@ production cost
 
 profit margin
 
-
-
 gst
-
-
 
 e.g
 
-
-we need to create a performa quoation invoice genrator, CRM 
+we need to create a performa quoation invoice genrator, CRM
 
 mobile first, very simple clean and very fast to make
 
