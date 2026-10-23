@@ -33,6 +33,15 @@ export function PipeSection({ spec, size = 52 }: { spec: PipeSpec; size?: number
       {/* Bore shading, then the wall */}
       <circle cx={cx} cy={cy} r={r} fill="#f1f5f9" />
       <path d={ring} fill="#1e293b" fillRule="evenodd" />
+      {/* Wall-thickness marker across the ring on the right */}
+      <line
+        x1={cx + r}
+        y1={cy}
+        x2={cx + R}
+        y2={cy}
+        stroke="var(--qd-accent-mark, #38bdf8)"
+        strokeWidth="1.4"
+      />
       <circle
         cx={cx}
         cy={cy}

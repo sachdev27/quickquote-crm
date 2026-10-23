@@ -25,6 +25,7 @@ export const brands = sqliteTable("brands", {
   upi_id: text("upi_id"),
   terms: text("terms"),
   default_preset_id: text("default_preset_id"),
+  logo: text("logo"),
   created_at: now(),
 });
 

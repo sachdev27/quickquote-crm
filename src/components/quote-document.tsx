@@ -65,17 +65,28 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
         {/* 1. Letterhead */}
         <header className="flex items-start justify-between gap-6 border-b-[1.5pt] border-[var(--qd-accent)] pb-[3mm]">
           <div className="flex gap-[3mm]">
-            {brand?.name && (
+            {!brand?.logo && brand?.name && (
               <div className="grid size-[12mm] shrink-0 place-items-center rounded-[1.5mm] bg-[var(--qd-accent)] text-[13pt] font-bold text-white">
                 {initials(brand.name)}
               </div>
             )}
             <div>
-              <p className="text-[15pt] font-bold leading-tight text-[var(--qd-ink)]">
-                {brand?.name}
-              </p>
-              {brand?.tagline && (
-                <p className="text-[8.5pt] text-[var(--qd-muted)]">{brand.tagline}</p>
+              {brand?.logo ? (
+                // The uploaded logo replaces the name + tagline.
+                <img
+                  src={brand.logo}
+                  alt={brand.name}
+                  className="max-h-[16mm] max-w-[70mm] object-contain object-left"
+                />
+              ) : (
+                <>
+                  <p className="text-[15pt] font-bold leading-tight text-[var(--qd-ink)]">
+                    {brand?.name}
+                  </p>
+                  {brand?.tagline && (
+                    <p className="text-[8.5pt] text-[var(--qd-muted)]">{brand.tagline}</p>
+                  )}
+                </>
               )}
               <div className="mt-[1.5mm] text-[8pt] leading-snug text-[var(--qd-muted)]">
                 {brand?.address && <p className="whitespace-pre-line">{brand.address}</p>}
