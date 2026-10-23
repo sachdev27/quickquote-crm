@@ -9,12 +9,15 @@ import {
   Plus,
   Printer,
   SlidersHorizontal,
+  Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, Field, inputCls } from "@/components/qq";
 import { Switch } from "@/components/ui/switch";
+import { BulkHsn } from "@/components/bulk-hsn";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
 import {
@@ -29,6 +32,7 @@ import {
   deletePreset,
   listPricing,
   listProducts,
+  removeProducts,
   saveGroup,
   savePreset,
   saveProduct,
@@ -438,18 +442,7 @@ function ProductsAdmin() {
           </Field>
         </div>
         {prod.category === "pipe" && (
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Supply">
-              <Chips
-                label="Supply"
-                value={prod.roll ?? "complete"}
-                onChange={(r) => setProd({ ...prod, roll: r })}
-                options={[
-                  { value: "complete", label: "Roll" },
-                  { value: "cut", label: "Cut" },
-                ]}
-              />
-            </Field>
+          <div className="grid grid-cols-1 gap-2">
             <Field label="Roll lengths (m)">
               <input
                 value={prod.roll_lengths ?? ""}
@@ -506,7 +499,7 @@ function ProductsAdmin() {
               ))}
             </select>
           </Field>
-          <Field label="HSN">
+          <Field label="HSN/SAC">
             <input
               value={prod.hsn ?? ""}
               onChange={(e) => setProd({ ...prod, hsn: e.target.value })}
@@ -1453,11 +1446,13 @@ function WeightChart({
   onAddOther: (cat: "sprinkler" | "fitting") => void;
 }) {
   const [editing, setEditing] = useState(false);
+  // In-house = your factory weights (what quotes use). IS 4984 is the reference chart, read-only.
+  const [basis, setBasis] = useState<"inhouse" | "is">("inhouse");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [adding, setAdding] = useState<Adding | null>(null);
   const [busy, setBusy] = useState(false);
-  // New grade × supply table, e.g. PE80 cut roll: sizes and PNs as comma lists.
+  // New grade table, e.g. PE80: sizes and PNs as comma lists.
   const [table, setTable] = useState<null | {
     grade: string;
     roll: string;
@@ -1508,6 +1503,27 @@ function WeightChart({
       toast.error(e instanceof Error ? e.message.slice(0, 140) : "Could not save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Delete a whole table, a size row or a PN column. Products used on saved quotes are only hidden.
+  async function remove(ids: string[], what: string) {
+    if (!ids.length) return;
+    if (!confirm(`Delete ${what}? This removes ${ids.length} product${ids.length > 1 ? "s" : ""}.`))
+      return;
+    setBusy(true);
+    try {
+      const r = await removeProducts({ data: { ids } });
+      onCreated();
+      toast.success(
+        r.hidden
+          ? `Deleted ${r.deleted}; ${r.hidden} used on quotes ${r.hidden > 1 ? "were" : "was"} hidden instead`
+          : `Deleted ${r.deleted}`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message.slice(0, 140) : "Could not delete");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1593,9 +1609,46 @@ function WeightChart({
   return (
     <div className="space-y-4">
       <div className="sticky top-16 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card/95 px-4 py-3 backdrop-blur">
-        <p className="text-sm text-muted-foreground">
-          kg per metre · grey = IS 4984:2016 reference, amber = differs from IS
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <div
+            role="radiogroup"
+            aria-label="Weight basis"
+            className="inline-flex h-8 rounded-lg border border-border bg-background p-0.5"
+          >
+            {(
+              [
+                ["inhouse", "In-house"],
+                ["is", "IS 4984"],
+              ] as const
+            ).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={basis === v}
+                onClick={() => {
+                  setBasis(v);
+                  if (v === "is") {
+                    setEditing(false);
+                    setDraft({});
+                  }
+                }}
+                className={`rounded-md px-3 text-[13px] font-semibold transition-colors ${
+                  basis === v
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {basis === "inhouse"
+              ? "kg per metre · your factory weights, used on quotes · amber = more than 5% from IS"
+              : "kg per metre · IS 4984:2016 reference weights (read-only)"}
+          </p>
+        </div>
         {editing ? (
           <div className="flex gap-2">
             <Button
@@ -1612,12 +1665,14 @@ function WeightChart({
               {saving ? "Saving…" : changes.length ? `Save changes (${changes.length})` : "Done"}
             </Button>
           </div>
-        ) : (
+        ) : basis === "inhouse" ? (
           <div className="flex gap-2">
             <Button
               variant="outline"
               className="h-10 rounded-xl"
-              onClick={() => setTable({ grade: "", roll: "cut", sizes: "", pns: "", lens: "" })}
+              onClick={() =>
+                setTable({ grade: "", roll: "complete", sizes: "", pns: "", lens: "" })
+              }
             >
               <Plus className="mr-1 h-4 w-4" /> New table
             </Button>
@@ -1625,11 +1680,11 @@ function WeightChart({
               Edit chart
             </Button>
           </div>
-        )}
+        ) : null}
       </div>
 
       {table && (
-        <Card title="New table · grade × supply">
+        <Card title="New table">
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Grade">
               <div className="space-y-2">
@@ -1648,17 +1703,6 @@ function WeightChart({
                   className={inputCls}
                 />
               </div>
-            </Field>
-            <Field label="Supply">
-              <Chips
-                label="Supply"
-                value={table.roll}
-                onChange={(r) => setTable({ ...table, roll: r })}
-                options={[
-                  { value: "complete", label: "Complete roll" },
-                  { value: "cut", label: "Cut roll" },
-                ]}
-              />
             </Field>
             <Field label="Sizes (mm, comma separated)">
               <input
@@ -1734,7 +1778,7 @@ function WeightChart({
         {tables.map((t) => (
           <Card
             key={t.key}
-            title={`${t.grade} · ${t.roll === "cut" ? "cut roll" : "complete roll"}`}
+            title={t.grade}
             aside={
               <span className="flex gap-3 text-xs font-semibold text-primary">
                 <button
@@ -1771,6 +1815,24 @@ function WeightChart({
                 >
                   + PN
                 </button>
+                {basis === "inhouse" && !editing && (
+                  <button type="button" onClick={() => setEditing(true)}>
+                    Edit
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="text-destructive"
+                  onClick={() =>
+                    remove(
+                      t.rows.map((p) => p.id),
+                      `the whole ${t.grade} table`,
+                    )
+                  }
+                >
+                  Delete table
+                </button>
               </span>
             }
           >
@@ -1781,8 +1843,26 @@ function WeightChart({
                   {t.pns.map((pn) => (
                     <th key={pn} className="py-1 text-right font-semibold">
                       {pn}
+                      {editing && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-label={`Delete ${t.grade} ${pn}`}
+                          title={`Delete ${pn} for every size`}
+                          className="ml-1 align-middle text-muted-foreground hover:text-destructive"
+                          onClick={() =>
+                            remove(
+                              t.rows.filter((p) => p.pn === pn).map((p) => p.id),
+                              `${t.grade} ${pn}`,
+                            )
+                          }
+                        >
+                          <X className="inline h-3 w-3" />
+                        </button>
+                      )}
                     </th>
                   ))}
+                  {editing && <th className="w-6" />}
                 </tr>
               </thead>
               <tbody>
@@ -1822,7 +1902,10 @@ function WeightChart({
                           </td>
                         );
                       const ref = isWeight(p);
-                      const differs = ref != null && Math.abs(ref - p.weight_kg) > 0.0005;
+                      const differs =
+                        basis === "inhouse" &&
+                        ref != null &&
+                        Math.abs(ref - p.weight_kg) / ref > 0.05;
                       return (
                         <td key={pn} className="py-1 text-right">
                           {editing ? (
@@ -1831,10 +1914,10 @@ function WeightChart({
                             <span
                               className={`text-sm font-semibold ${differs ? "text-amber-700" : ""}`}
                             >
-                              {fmtNum(p.weight_kg, 3)}
+                              {fmtNum(basis === "is" ? (ref ?? p.weight_kg) : p.weight_kg, 3)}
                             </span>
                           )}
-                          {ref != null && (
+                          {basis === "inhouse" && ref != null && (
                             <span className="block text-[10px] text-muted-foreground">
                               IS {fmtNum(ref, 3)}
                             </span>
@@ -1842,6 +1925,25 @@ function WeightChart({
                         </td>
                       );
                     })}
+                    {editing && (
+                      <td className="pl-1 text-right">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-label={`Delete ${size} mm`}
+                          title={`Delete ${size} mm for every PN`}
+                          className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-destructive"
+                          onClick={() =>
+                            remove(
+                              t.rows.filter((p) => p.size_mm === size).map((p) => p.id),
+                              `${t.grade} ${size} mm`,
+                            )
+                          }
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -2012,6 +2114,8 @@ function ProductList({
   const [q, setQ] = useState("");
   const [withGst, setWithGst] = useState(false);
   const [view, setView] = useState<"list" | "matrix">("list");
+  const [sel, setSel] = useState<Set<string>>(new Set()); // ticked products (list view)
+  const [deleting, setDeleting] = useState(false);
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<null | {
@@ -2065,6 +2169,61 @@ function ProductList({
     }
     return [...m.entries()];
   }, [products, cat, q]);
+
+  // Selection: only products that still exist count (they vanish after a delete).
+  const visibleIds = sections.flatMap(([, items]) => items.map((p) => p.id));
+  const picked = visibleIds.filter((id) => sel.has(id));
+  const allIds = new Set(products.map((p) => p.id));
+  const chosen = [...sel].filter((id) => allIds.has(id));
+  const toggle = (ids: string[], on: boolean) =>
+    setSel((cur) => {
+      const next = new Set(cur);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  async function deleteChosen() {
+    if (!chosen.length) return;
+    if (
+      !confirm(
+        `Delete ${chosen.length} product${chosen.length > 1 ? "s" : ""}? Products used on saved quotes are hidden instead, so those quotes still open.`,
+      )
+    )
+      return;
+    setDeleting(true);
+    try {
+      const r = await removeProducts({ data: { ids: chosen } });
+      await qc.invalidateQueries({ queryKey: ["products"] });
+      setSel(new Set());
+      toast.success(
+        r.hidden
+          ? `Deleted ${r.deleted}; ${r.hidden} used on quotes ${r.hidden > 1 ? "were" : "was"} hidden instead`
+          : `Deleted ${r.deleted}`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message.slice(0, 140) : "Could not delete");
+    } finally {
+      setDeleting(false);
+    }
+  }
+  const tick = (ids: string[], label: string) => {
+    const on = ids.length > 0 && ids.every((id) => sel.has(id));
+    return (
+      <input
+        type="checkbox"
+        aria-label={label}
+        checked={on}
+        ref={(el) => {
+          if (el) el.indeterminate = !on && ids.some((id) => sel.has(id));
+        }}
+        onChange={(e) => toggle(ids, e.target.checked)}
+        onClick={(e) => e.stopPropagation()}
+        className="size-4 cursor-pointer accent-[var(--color-primary)]"
+      />
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -2135,6 +2294,7 @@ function ProductList({
           Incl. GST <Switch checked={withGst} onCheckedChange={setWithGst} />
         </label>
         <div className="flex gap-2 lg:ml-auto">
+          <BulkHsn products={products} />
           <Button
             variant="outline"
             className="h-10 rounded-xl"
@@ -2208,16 +2368,53 @@ function ProductList({
           )}
         </DrawerContent>
       </Drawer>
+      {chosen.length > 0 && view === "list" && (
+        <div className="sticky top-12 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-primary/40 bg-card px-3 py-2 text-sm shadow-sm">
+          <b>{chosen.length} selected</b>
+          {picked.length < visibleIds.length && (
+            <button
+              type="button"
+              className="font-semibold text-primary"
+              onClick={() => toggle(visibleIds, true)}
+            >
+              Select all {visibleIds.length}
+            </button>
+          )}
+          <button
+            type="button"
+            className="font-semibold text-primary"
+            onClick={() => setSel(new Set())}
+          >
+            Clear
+          </button>
+          <Button
+            variant="outline"
+            className="ml-auto h-9 rounded-lg border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={deleting}
+            onClick={deleteChosen}
+          >
+            <Trash2 className="mr-1 h-4 w-4" /> {deleting ? "Deleting…" : `Delete ${chosen.length}`}
+          </Button>
+        </div>
+      )}
       {loading && <div className="h-64 animate-pulse rounded-2xl bg-secondary" />}
       <div className="lg:hidden space-y-4">
         {sections.map(([title, items]) => (
-          <Card key={title} title={title}>
+          <Card
+            key={title}
+            title={title}
+            aside={tick(
+              items.map((p) => p.id),
+              `Select all in ${title}`,
+            )}
+          >
             <ul className="-my-1 divide-y divide-border/60">
               {items.map((p) => {
                 const rate = rateOf(p.rate_group_id);
                 const up = rate * p.weight_kg;
                 return (
                   <li key={p.id} className="flex items-center gap-3 py-2">
+                    {tick([p.id], `Select ${shortName(p)}`)}
                     <button
                       type="button"
                       className="min-w-0 flex-1 text-left"
@@ -2273,6 +2470,7 @@ function ProductList({
                 <table className="w-full tabular-nums">
                   <thead className="sticky top-0 bg-card">
                     <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="w-7 py-2 pr-1">{tick(visibleIds, "Select all products")}</th>
                       <th className="py-2 pr-3 font-semibold">Product</th>
                       <th className="px-2 font-semibold">Grade</th>
                       <th className="px-2 font-semibold">PN</th>
@@ -2290,6 +2488,12 @@ function ProductList({
                     {sections.map(([title, items]) => (
                       <Fragment key={title}>
                         <tr>
+                          <td className="pt-4 pb-1 pr-1">
+                            {tick(
+                              items.map((p) => p.id),
+                              `Select all in ${title}`,
+                            )}
+                          </td>
                           <td
                             colSpan={5 + (pricing?.presets.length ?? 0)}
                             className="pt-4 pb-1 text-xs font-semibold uppercase tracking-wider text-primary"
@@ -2303,6 +2507,9 @@ function ProductList({
                             onClick={() => onEdit(p)}
                             className={`cursor-pointer border-b border-border/50 ${p.id === selectedId ? "bg-primary/10" : "hover:bg-secondary/40"}`}
                           >
+                            <td className="py-1.5 pr-1" onClick={(e) => e.stopPropagation()}>
+                              {tick([p.id], `Select ${shortName(p)}`)}
+                            </td>
                             <td className="py-1.5 pr-3 text-sm font-medium">{shortName(p)}</td>
                             <td className="px-2 text-sm">{p.grade ?? "—"}</td>
                             <td className="px-2 text-sm">{p.pn ? pnNumber(p.pn) || p.pn : "—"}</td>
@@ -2634,7 +2841,7 @@ function ProductMatrix({
                   colSpan={1 + t.pns.length}
                   className="pb-1 text-left text-xs font-semibold uppercase tracking-wider text-primary"
                 >
-                  {t.grade} · {t.roll === "cut" ? "cut roll" : "complete roll"}
+                  {t.grade}
                 </th>
               </tr>
               <tr className="border-b border-border text-xs text-muted-foreground">

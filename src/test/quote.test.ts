@@ -5,6 +5,14 @@ import { pipeSpec } from "@/lib/pipe-spec";
 import { stateOf, validUntil } from "@/lib/quote-doc";
 import { parseRoll, withRolls } from "@/lib/rolls";
 import { fyOf, invoiceNoOf, todayIST } from "@/lib/invoice";
+import {
+  FITTING_LIST,
+  fittingKey,
+  fittingName,
+  fittingSize,
+  netPrice,
+  pairSize,
+} from "@/lib/fitting";
 import { describeChanges, type AuditSnap } from "@/lib/audit";
 import { ageLabel, daysSince, hueOf, initialsOf, staleness } from "@/lib/board";
 
@@ -225,5 +233,45 @@ describe("invoice numbering", () => {
   it("converts the clock to the Indian date", () => {
     expect(todayIST(Date.parse("2026-10-23T20:00:00Z"))).toBe("2026-10-24"); // 1:30 am IST next day
     expect(todayIST(Date.parse("2026-10-23T10:00:00Z"))).toBe("2026-10-23");
+  });
+});
+
+describe("fitting entry", () => {
+  it("formats sizes", () => {
+    expect(fittingSize("63")).toBe("63 mm");
+    expect(fittingSize("90x63")).toBe("90 × 63 mm");
+    expect(fittingSize(" 110 X 75 ")).toBe("110 × 75 mm");
+    expect(fittingSize('2" BSP')).toBe('2" BSP');
+    expect(fittingSize("")).toBe("");
+  });
+  it("builds the item name; description is optional", () => {
+    expect(fittingName("Elbow 90°", "63")).toBe("Elbow 90° 63 mm");
+    expect(fittingName("Reducer", "90x63", "Spigot moulded")).toBe(
+      "Reducer 90 × 63 mm · Spigot moulded",
+    );
+  });
+  it("applies a list-price discount", () => {
+    expect(netPrice(1000, 40)).toBe(600);
+    expect(netPrice(333, 35)).toBe(216.45);
+    expect(netPrice(500, 0)).toBe(500);
+    expect(netPrice(500, 150)).toBe(0);
+  });
+});
+
+describe("fitting list", () => {
+  it("joins two sizes and has the sheet families", () => {
+    expect(pairSize("90", "63")).toBe("90x63");
+    expect(pairSize("63", "")).toBe("63");
+    expect(fittingName("Reducer", pairSize("90", "63"), "Electrofusion")).toBe(
+      "Reducer 90 × 63 mm · Electrofusion",
+    );
+    const keys = FITTING_LIST.map(fittingKey);
+    expect(new Set(keys).size).toBe(keys.length); // no duplicates
+    expect(new Set(FITTING_LIST.map((d) => d.family))).toEqual(
+      new Set(["Electrofusion", "Spigot moulded", "Pipe fitting", "Butt-weld"]),
+    );
+    expect(
+      FITTING_LIST.filter((d) => d.pair).every((d) => /Reducer|Reducing|Saddle/.test(d.product)),
+    ).toBe(true);
   });
 });

@@ -242,3 +242,9 @@ export const invoice_items = sqliteTable("invoice_items", {
   unit_price: real("unit_price").notNull(),
   gst_rate: real("gst_rate").notNull().default(18),
 });
+
+// Key/value settings (default HSN/SAC and GST for fittings, ...).
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});

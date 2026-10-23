@@ -26,6 +26,7 @@ import {
   quote_audit,
   invoices,
   invoice_items,
+  settings,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -37,6 +38,13 @@ const money = z.number().finite().min(0).max(1e9);
 const gst = z.number().min(0).max(100);
 const category = z.enum(["pipe", "sprinkler", "fitting"]);
 const unit = z.enum(["m", "pc", "kg"]);
+
+// D1 allows at most 100 bound parameters per statement, so long id lists go in chunks.
+async function inChunks<T>(ids: string[], run: (part: string[]) => Promise<T[]>): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += 90) out.push(...(await run(ids.slice(i, i + 90))));
+  return out;
+}
 
 const toLine = (r: typeof quote_items.$inferSelect): Line => ({
   productId: r.product_id,
@@ -532,6 +540,84 @@ export const importProducts = createServerFn({ method: "POST" })
     return { added, updated };
   });
 
+// Delete products (whole table, a size row or a PN column). Products already used on a saved quote
+// are only hidden, so those quotes keep opening.
+export const removeProducts = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(z.object({ ids: z.array(z.string()).min(1).max(500) }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const used = new Set(
+      (
+        await inChunks(data.ids, (part) =>
+          db
+            .select({ id: quote_items.product_id })
+            .from(quote_items)
+            .where(inArray(quote_items.product_id, part)),
+        )
+      ).map((u) => u.id),
+    );
+    const gone = data.ids.filter((i) => !used.has(i));
+    const hide = data.ids.filter((i) => used.has(i));
+    for (let i = 0; i < gone.length; i += 90)
+      await db.delete(products).where(inArray(products.id, gone.slice(i, i + 90)));
+    for (let i = 0; i < hide.length; i += 90)
+      await db
+        .update(products)
+        .set({ active: 0 })
+        .where(inArray(products.id, hide.slice(i, i + 90)));
+    return { deleted: gone.length, hidden: hide.length };
+  });
+
+// ---------- settings: default HSN/SAC and GST for fittings typed on a quote ----------
+const SETTING_DEFAULTS = { fitting_hsn: "3917 40 00", fitting_gst: "18" };
+export const getSettings = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .handler(async () => {
+    const rows = await (await getDb()).select().from(settings);
+    const m = { ...SETTING_DEFAULTS, ...Object.fromEntries(rows.map((r) => [r.key, r.value])) };
+    return { fittingHsn: m.fitting_hsn, fittingGst: Number(m.fitting_gst) || 18 };
+  });
+
+// Change HSN/SAC (and optionally GST) for a whole type of product in one go.
+export const setHsnBulk = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(
+    z.object({
+      scope: z.enum(["all_pipes", "PE63", "PE80", "PE100", "sprinkler", "fittings"]),
+      hsn: z.string().trim().max(20).optional(),
+      gst: z.number().min(0).max(28).optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    if (!data.hsn && data.gst == null) throw new Error("Enter an HSN/SAC or a GST rate");
+    const db = await getDb();
+    const patch = {
+      ...(data.hsn ? { hsn: data.hsn } : {}),
+      ...(data.gst != null ? { gst_rate: data.gst } : {}),
+    };
+    const where =
+      data.scope === "all_pipes"
+        ? eq(products.category, "pipe")
+        : data.scope === "sprinkler"
+          ? eq(products.category, "sprinkler")
+          : data.scope === "fittings"
+            ? eq(products.category, "fitting")
+            : and(eq(products.category, "pipe"), eq(products.grade, data.scope));
+    const rows = await db.update(products).set(patch).where(where).returning({ id: products.id });
+    if (data.scope === "fittings") {
+      // fittings typed on a quote have no catalog rows; the quote form reads these defaults
+      const save = (key: string, value: string) =>
+        db
+          .insert(settings)
+          .values({ key, value })
+          .onConflictDoUpdate({ target: settings.key, set: { value } });
+      if (data.hsn) await save("fitting_hsn", data.hsn);
+      if (data.gst != null) await save("fitting_gst", String(data.gst));
+    }
+    return { updated: rows.length };
+  });
+
 export const setProductWeight = createServerFn({ method: "POST" })
   .middleware([adminOnly])
   .validator(z.object({ id: z.string(), weight_kg: z.number().finite().min(0).max(10000) }))
@@ -557,17 +643,10 @@ export const listQuotes = createServerFn({ method: "GET" })
       .leftJoin(customers, eq(customers.id, quotes.customer_id))
       .orderBy(desc(quotes.created_at))
       .limit(200);
-    const items = rows.length
-      ? await db
-          .select()
-          .from(quote_items)
-          .where(
-            inArray(
-              quote_items.quote_id,
-              rows.map((r) => r.q.id),
-            ),
-          )
-      : [];
+    const items = await inChunks(
+      rows.map((r) => r.q.id),
+      (part) => db.select().from(quote_items).where(inArray(quote_items.quote_id, part)),
+    );
     return rows.map(({ q, brand, customer }) => ({
       id: q.id,
       quote_no: q.quote_no,
@@ -1006,17 +1085,10 @@ export const listInvoices = createServerFn({ method: "GET" })
       .leftJoin(brands, eq(brands.id, invoices.brand_id))
       .orderBy(desc(invoices.created_at))
       .limit(300);
-    const items = rows.length
-      ? await db
-          .select()
-          .from(invoice_items)
-          .where(
-            inArray(
-              invoice_items.invoice_id,
-              rows.map((r) => r.inv.id),
-            ),
-          )
-      : [];
+    const items = await inChunks(
+      rows.map((r) => r.inv.id),
+      (part) => db.select().from(invoice_items).where(inArray(invoice_items.invoice_id, part)),
+    );
     return rows.map(({ inv, brand }) => ({
       id: inv.id,
       invoice_no: inv.invoice_no,

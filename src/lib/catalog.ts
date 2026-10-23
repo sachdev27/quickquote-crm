@@ -15,7 +15,7 @@ type P = {
 
 export function sectionOf(p: P) {
   if (p.category !== "pipe") return CATEGORY_LABELS[p.category as Category];
-  return `HDPE ${p.grade ?? ""} · ${p.roll === "cut" ? "Cut roll" : "Complete roll"}`;
+  return `HDPE ${p.grade ?? ""} pipe`;
 }
 
 export function shortName(p: P) {
