@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ExternalLink, Plus } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowDown, ArrowUp, CalendarClock, ExternalLink, Phone, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { recall, remember } from "@/lib/utils";
 import { PageShell } from "@/components/bottom-nav";
 import { Chips, StatusPill, inputCls } from "@/components/qq";
-import { STATUS_LABELS, fmtMoney } from "@/lib/quote";
-import { getQuote, listQuotes } from "@/data/api";
+import { STAGES, STATUS_LABELS, fmtMoney, type Stage } from "@/lib/quote";
+import { getQuote, listFollowUps, listQuotes, setQuoteStatus } from "@/data/api";
 import { QuoteDocument } from "@/components/quote-document";
 import { Button } from "@/components/ui/button";
 
@@ -15,44 +17,178 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 });
 
 function Dashboard() {
+  const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
+  const [view, setViewState] = useState<"list" | "pipeline">(() =>
+    recall("tarko.quotesView") === "pipeline" ? "pipeline" : "list",
+  );
+  const setView = (v: "list" | "pipeline") => {
+    setViewState(v);
+    remember("tarko.quotesView", v);
+  };
   const quotes = useQuery({ queryKey: ["quotes"], queryFn: () => listQuotes(), staleTime: 30_000 });
+  const follow = useQuery({
+    queryKey: ["followups"],
+    queryFn: () => listFollowUps(),
+    staleTime: 30_000,
+  });
 
   const all = quotes.data ?? [];
   const rows = all.filter(
     (r) =>
-      (status === "all" || r.status === status) &&
+      (status === "all" || view === "pipeline" || r.status === status) &&
       `${r.quote_no} ${r.customer_name ?? ""} ${r.brand_name ?? ""}`
         .toLowerCase()
         .includes(q.toLowerCase()),
   );
-  const sum = (f: (s: string) => boolean) =>
-    all.filter((r) => f(r.status)).reduce((s, r) => s + r.total, 0);
+
+  // KPIs
+  const month = new Date().toISOString().slice(0, 7);
+  const open = all.filter((r) => ["draft", "sent", "negotiation"].includes(r.status));
+  const wonMonth = all.filter((r) => r.status === "won" && r.quote_date.startsWith(month));
+  const closed = all.filter((r) => r.status === "won" || r.status === "lost");
+  const conversion = closed.length
+    ? Math.round((closed.filter((r) => r.status === "won").length / closed.length) * 100)
+    : null;
+  const today = new Date().toISOString().slice(0, 10);
+  const due = (follow.data ?? []).filter((f) => f.a.due_date! <= today);
+  const byBrand = Object.entries(
+    wonMonth.reduce<Record<string, number>>(
+      (m, r) => ({ ...m, [r.brand_name ?? "—"]: (m[r.brand_name ?? "—"] ?? 0) + r.total }),
+      {},
+    ),
+  ).sort((x, y) => y[1] - x[1]);
+  const maxBrand = Math.max(1, ...byBrand.map(([, v]) => v));
+
+  async function move(id: string, stage: Stage) {
+    // optimistic: card jumps column immediately
+    qc.setQueryData(["quotes"], (old: typeof all | undefined) =>
+      old?.map((r) => (r.id === id ? { ...r, status: stage } : r)),
+    );
+    try {
+      await setQuoteStatus({ data: { id, status: stage } });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not move");
+    }
+    qc.invalidateQueries({ queryKey: ["quotes"] });
+  }
 
   return (
     <PageShell title="Quotes" wide>
-      <div className="mb-4 grid grid-cols-2 gap-3">
-        <Stat label="Open" value={fmtMoney(sum((s) => s === "draft" || s === "sent"))} />
-        <Stat label="Won" value={fmtMoney(sum((s) => s === "won"))} tone="text-emerald-700" />
-      </div>
-      <input
-        placeholder="Search quote, customer or brand"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        className={`${inputCls} mb-3`}
-      />
-      <div className="mb-4">
-        <Chips
-          label="Status filter"
-          value={status}
-          onChange={setStatus}
-          options={[
-            { value: "all", label: "All" },
-            ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
-          ]}
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat
+          label={`Pipeline · ${open.length} open`}
+          value={fmtMoney(open.reduce((s, r) => s + r.total, 0))}
+        />
+        <Stat
+          label={`Won this month · ${wonMonth.length}`}
+          value={fmtMoney(wonMonth.reduce((s, r) => s + r.total, 0))}
+          tone="text-emerald-700"
+        />
+        <Stat
+          label="Conversion (won / closed)"
+          value={conversion == null ? "—" : `${conversion}%`}
+        />
+        <Stat
+          label="Follow-ups due"
+          value={String(due.length)}
+          tone={due.length ? "text-amber-700" : ""}
         />
       </div>
+
+      {(due.length > 0 || byBrand.length > 0) && (
+        <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Today's follow-ups
+            </p>
+            {due.length === 0 && <p className="text-sm text-muted-foreground">Nothing due. 🎉</p>}
+            <ul className="divide-y divide-border/60">
+              {due.slice(0, 8).map((f) => (
+                <li key={f.a.id} className="flex items-center gap-3 py-2 text-sm">
+                  <span
+                    className={`shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold ${f.a.due_date! < today ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800"}`}
+                  >
+                    {f.a.due_date! < today ? "Overdue" : "Today"}
+                  </span>
+                  <Link
+                    to="/quotes/$id"
+                    params={{ id: f.a.quote_id! }}
+                    className="min-w-0 flex-1 truncate hover:text-primary"
+                  >
+                    <b>{f.customer ?? "Walk-in"}</b> · {f.quote_no} ·{" "}
+                    <span className="text-muted-foreground">{f.a.text}</span>
+                  </Link>
+                  {f.phone && (
+                    <a
+                      href={`tel:${f.phone}`}
+                      aria-label="Call"
+                      className="rounded-full bg-secondary p-2 text-primary"
+                    >
+                      <Phone className="h-4 w-4" />
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+          {byBrand.length > 0 && (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Won this month by brand
+              </p>
+              <ul className="space-y-2">
+                {byBrand.map(([b, v]) => (
+                  <li key={b} className="text-sm">
+                    <div className="flex justify-between tabular-nums">
+                      <span>{b}</span>
+                      <b>{fmtMoney(v)}</b>
+                    </div>
+                    <div className="mt-1 h-1.5 rounded-full bg-secondary">
+                      <div
+                        className="h-1.5 rounded-full bg-emerald-600"
+                        style={{ width: `${(v / maxBrand) * 100}%` }}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Chips
+          label="View"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "list" as const, label: "List" },
+            { value: "pipeline" as const, label: "Pipeline" },
+          ]}
+        />
+        <input
+          placeholder="Search quote, customer or brand"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          className={`${inputCls} min-w-[12rem] flex-1 lg:max-w-sm`}
+        />
+      </div>
+      {view === "list" && (
+        <div className="mb-4">
+          <Chips
+            label="Status filter"
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: "all", label: "All" },
+              ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
+            ]}
+          />
+        </div>
+      )}
 
       {quotes.isLoading && (
         <div className="space-y-3">
@@ -64,45 +200,171 @@ function Dashboard() {
       {quotes.error && (
         <p className="text-sm text-destructive">{(quotes.error as Error).message}</p>
       )}
-      {quotes.data && rows.length === 0 && (
+      {quotes.data && all.length === 0 && (
         <div className="rounded-2xl border border-dashed border-border p-8 text-center">
-          <p className="font-semibold">{all.length ? "No matching quotes" : "No quotes yet"}</p>
-          {!all.length && (
-            <Link
-              to="/new-quote"
-              className="mt-3 inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground"
-            >
-              <Plus className="h-4 w-4" /> Create your first quote
-            </Link>
-          )}
+          <p className="font-semibold">No quotes yet</p>
+          <Link
+            to="/new-quote"
+            className="mt-3 inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground"
+          >
+            <Plus className="h-4 w-4" /> Create your first quote
+          </Link>
         </div>
       )}
-      <div className="grid gap-3 md:grid-cols-2 lg:hidden">
-        {rows.map((r) => (
-          <Link
-            key={r.id}
-            to="/quotes/$id"
-            params={{ id: r.id }}
-            preload="intent"
-            className="rounded-2xl border border-border bg-card p-4 transition active:scale-[0.99] active:bg-secondary"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-muted-foreground">{r.quote_no}</span>
-              <StatusPill status={r.status} label={STATUS_LABELS[r.status] ?? r.status} />
-            </div>
-            <p className="mt-1 truncate font-semibold">{r.customer_name ?? "Walk-in customer"}</p>
-            <div className="mt-1 flex items-baseline justify-between">
-              <span className="text-xs text-muted-foreground">
-                {r.brand_name} · {r.quote_date}
+
+      {view === "pipeline" ? (
+        <Pipeline rows={rows} followUps={follow.data ?? []} onMove={move} />
+      ) : (
+        <>
+          <div className="grid gap-3 md:grid-cols-2 lg:hidden">
+            {rows.map((r) => (
+              <Link
+                key={r.id}
+                to="/quotes/$id"
+                params={{ id: r.id }}
+                preload="intent"
+                className="rounded-2xl border border-border bg-card p-4 transition active:scale-[0.99] active:bg-secondary"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-muted-foreground">{r.quote_no}</span>
+                  <StatusPill status={r.status} label={STATUS_LABELS[r.status] ?? r.status} />
+                </div>
+                <p className="mt-1 truncate font-semibold">
+                  {r.customer_name ?? "Walk-in customer"}
+                </p>
+                <div className="mt-1 flex items-baseline justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {r.brand_name} · {r.quote_date}
+                  </span>
+                  <span className="text-xl font-bold tabular-nums">{fmtMoney(r.total)}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+          {rows.length > 0 && <DesktopQuotes rows={rows} />}
+        </>
+      )}
+    </PageShell>
+  );
+}
+
+type FollowUp = Awaited<ReturnType<typeof listFollowUps>>[number];
+
+// Deal board. Desktop: drag a card to another column. Phone: stage tabs + "Move to" on each card.
+function Pipeline({
+  rows,
+  followUps,
+  onMove,
+}: {
+  rows: QRow[];
+  followUps: FollowUp[];
+  onMove: (id: string, s: Stage) => void;
+}) {
+  const [mobileStage, setMobileStage] = useState<Stage>("sent");
+  const [over, setOver] = useState<Stage | null>(null);
+  const nextFollow = (id: string) => followUps.find((f) => f.a.quote_id === id)?.a.due_date;
+  const today = new Date().toISOString().slice(0, 10);
+  const col = (s: Stage) => rows.filter((r) => r.status === s);
+  const COLORS: Record<Stage, string> = {
+    draft: "border-t-slate-400",
+    sent: "border-t-sky-500",
+    negotiation: "border-t-amber-500",
+    won: "border-t-emerald-600",
+    lost: "border-t-rose-500",
+  };
+
+  const card = (r: QRow, mobile = false) => {
+    const fu = nextFollow(r.id);
+    return (
+      <div
+        key={r.id}
+        draggable={!mobile}
+        onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)}
+        className="cursor-grab rounded-xl border border-border bg-card p-3 shadow-sm active:cursor-grabbing"
+      >
+        <Link to="/quotes/$id" params={{ id: r.id }} className="block">
+          <p className="truncate text-sm font-semibold">{r.customer_name ?? "Walk-in"}</p>
+          <p className="text-xs text-muted-foreground">
+            {r.quote_no} · {r.brand_name}
+          </p>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-base font-bold tabular-nums">{fmtMoney(r.total)}</span>
+            {fu && (
+              <span
+                className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${fu < today ? "bg-rose-100 text-rose-800" : fu === today ? "bg-amber-100 text-amber-800" : "bg-secondary text-muted-foreground"}`}
+              >
+                <CalendarClock className="h-3 w-3" /> {fu.slice(5)}
               </span>
-              <span className="text-xl font-bold tabular-nums">{fmtMoney(r.total)}</span>
+            )}
+          </div>
+        </Link>
+        {mobile && (
+          <select
+            aria-label="Move to stage"
+            value={r.status}
+            onChange={(e) => onMove(r.id, e.target.value as Stage)}
+            className="mt-2 h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+          >
+            {STAGES.map((s) => (
+              <option key={s} value={s}>
+                Move to: {STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <>
+      {/* phone */}
+      <div className="space-y-3 lg:hidden">
+        <Chips<Stage>
+          label="Stage"
+          value={mobileStage}
+          onChange={setMobileStage}
+          options={STAGES.map((s) => ({
+            value: s,
+            label: STATUS_LABELS[s]!,
+            sub: `${col(s).length} · ${fmtMoney(col(s).reduce((t, r) => t + r.total, 0))}`,
+          }))}
+        />
+        {col(mobileStage).length === 0 && (
+          <p className="py-6 text-center text-sm text-muted-foreground">No deals in this stage.</p>
+        )}
+        {col(mobileStage).map((r) => card(r, true))}
+      </div>
+      {/* desktop */}
+      <div className="hidden gap-3 lg:grid lg:grid-cols-5">
+        {STAGES.map((s) => (
+          <div
+            key={s}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setOver(s);
+            }}
+            onDragLeave={() => setOver(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setOver(null);
+              const id = e.dataTransfer.getData("text/plain");
+              if (id) onMove(id, s);
+            }}
+            className={`flex min-h-[60vh] flex-col rounded-2xl border border-t-4 border-border bg-secondary/40 ${COLORS[s]} ${over === s ? "ring-2 ring-primary" : ""}`}
+          >
+            <div className="px-3 pt-3">
+              <p className="text-sm font-semibold">{STATUS_LABELS[s]}</p>
+              <p className="text-xs tabular-nums text-muted-foreground">
+                {fmtMoney(col(s).reduce((t, r) => t + r.total, 0))} · {col(s).length} deal
+                {col(s).length === 1 ? "" : "s"}
+              </p>
             </div>
-          </Link>
+            <div className="flex-1 space-y-2 overflow-y-auto p-2">{col(s).map((r) => card(r))}</div>
+          </div>
         ))}
       </div>
-
-      {rows.length > 0 && <DesktopQuotes rows={rows} />}
-    </PageShell>
+    </>
   );
 }
 

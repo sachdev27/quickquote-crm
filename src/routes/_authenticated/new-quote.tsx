@@ -366,50 +366,75 @@ function NewQuote() {
   const cell =
     "h-9 w-full rounded-lg border border-input bg-background px-2 text-right text-sm tabular-nums outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 
-  // Quick add: "63 6 2" = 63 mm PN 6, 2 rolls · "pe80 90 8 300m" · "cut 50 6 40m" · "spr 10".
+  // Quick add with live suggestions. Order: brand OD PN PE roll/cut, e.g. "tarko 63 6 pe63 roll x2".
+  // Every part is optional and can be partial; "x2" = 2 rolls (or pieces), "300m" = metres.
   const quickRef = useRef<HTMLInputElement>(null);
   const [quick, setQuick] = useState("");
-  function quickAdd() {
-    const toks = quick
-      .toLowerCase()
-      .split(/[\s,x×]+/)
-      .filter(Boolean);
-    if (!toks.length) return;
-    const all = prods.data ?? [];
-    if (/^spr/.test(toks[0]!) || /^fit/.test(toks[0]!)) {
-      const cat = /^spr/.test(toks[0]!) ? "sprinkler" : "fitting";
-      const p = all.find((x) => x.category === cat);
-      const n = Number(toks[1] ?? 1) || 1;
-      if (!p) return void toast.error(`No ${cat} products yet`);
-      addFromCatalogQty(p, n);
-      setQuick("");
-      return;
-    }
-    const grade = toks.find((t) => /^pe\d+$/.test(t))?.toUpperCase();
-    const roll = toks.includes("cut") ? "cut" : "complete";
-    const nums = toks.filter((t) => /^\d+(\.\d+)?m?$/.test(t));
-    const [size, pn, qtyTok] = [Number(nums[0]), Number(nums[1]), nums[2]];
-    if (!size || !pn) return void toast.error('Type size and PN, e.g. "63 6 2"');
-    const p = all.find(
-      (x) =>
-        x.category === "pipe" &&
-        x.size_mm === size &&
-        pnNumber(x.pn) === pn &&
-        (x.roll ?? "complete") === roll &&
-        (!grade || x.grade === grade),
+  const [qi, setQi] = useState(0);
+  const suggestions = useMemo(() => {
+    const toks = quick.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!toks.length) return [];
+    const qtyTok = toks.find((t) => /^x\d+(\.\d+)?$/.test(t) || /^\d+(\.\d+)?m$/.test(t));
+    const rest = toks.filter((t) => t !== qtyTok);
+    const brand = brands.data?.find((b) =>
+      rest.some((t) => b.name.toLowerCase().replace(/\s/g, "").startsWith(t) && t.length >= 2),
     );
-    if (!p)
-      return void toast.error(
-        `No ${grade ?? ""} ${size} mm PN ${pn}${roll === "cut" ? " cut roll" : ""} in products`,
-      );
-    const len = (p.roll_lengths ?? "").split("/").map(Number).find(Boolean);
-    const qty = qtyTok?.endsWith("m")
-      ? Number(qtyTok.slice(0, -1))
-      : (Number(qtyTok ?? 1) || 1) * (len ?? 100);
-    addFromCatalogQty(p, qty);
-    toast.success(`Added ${p.grade} ${size} mm PN ${pn} · ${fmtNum(qty)} m`, { duration: 1200 });
+    const words = rest.filter(
+      (t) => !(brand && brand.name.toLowerCase().replace(/\s/g, "").startsWith(t)),
+    );
+    const nums = words.filter((t) => /^\d+(\.\d+)?$/.test(t));
+    const grade = words.find((t) => /^pe\d*$/.test(t));
+    const roll = words.find((t) => /^(cut|c)$/.test(t) || ("cut".startsWith(t) && t.length > 1))
+      ? "cut"
+      : words.find((t) => "roll".startsWith(t) || "complete".startsWith(t))
+        ? "complete"
+        : null;
+    const text = words.filter(
+      (t) => !nums.includes(t) && t !== grade && !/^(cut|roll|r|c|complete)$/.test(t),
+    );
+    const out = (prods.data ?? []).filter((p) => {
+      if (p.category === "pipe") {
+        if (nums[0] && !String(p.size_mm ?? "").startsWith(nums[0])) return false;
+        if (nums[1] && !String(pnNumber(p.pn)).startsWith(nums[1])) return false;
+        if (grade && !(p.grade ?? "").toLowerCase().startsWith(grade)) return false;
+        if (roll && (p.roll ?? "complete") !== roll) return false;
+        return text.every((t) => p.name.toLowerCase().includes(t));
+      }
+      if (nums.length > 1 || grade || roll) return false;
+      return text.length > 0 && text.every((t) => p.name.toLowerCase().includes(t));
+    });
+    // exact size match first, then catalog order
+    out.sort(
+      (x, y) => Number(String(y.size_mm) === nums[0]) - Number(String(x.size_mm) === nums[0]),
+    );
+    const qty = (p: Product) => {
+      const len = (p.roll_lengths ?? "").split("/").map(Number).find(Boolean);
+      if (qtyTok?.endsWith("m")) return Number(qtyTok.slice(0, -1));
+      const n = qtyTok ? Number(qtyTok.slice(1)) : p.category === "pipe" ? 1 : Number(nums[0]) || 1;
+      return p.unit === "m" ? n * (len ?? 100) : n;
+    };
+    return out.slice(0, 8).map((p) => ({ p, brand, qty: qty(p) }));
+  }, [quick, prods.data, brands.data]);
+
+  function quickAdd(i = qi) {
+    const s = suggestions[i];
+    if (!s) return void toast.error("No matching product. Try: tarko 63 6 pe63 roll x2");
+    if (s.brand && s.brand.id !== brandId) {
+      setBrandId(s.brand.id);
+      remember(LAST_BRAND, s.brand.id);
+      if (lines.length)
+        toast.message(
+          `Quote brand changed to ${s.brand.name}; all lines now price with ${s.brand.name}'s raw material.`,
+        );
+    }
+    addFromCatalogQty(s.p, s.qty);
     setQuick("");
+    setQi(0);
   }
+  const suggestLabel = (p: Product) =>
+    p.category === "pipe"
+      ? `${p.size_mm} mm${p.inch ? ` (${p.inch})` : ""} · PN ${pnNumber(p.pn) || p.pn} · ${p.grade} · ${p.roll === "cut" ? "Cut roll" : "Roll"}`
+      : p.name;
   function addFromCatalogQty(p: Product, qty: number) {
     const existing = lines.find((l) => l.productId === p.id);
     if (existing) return patch(existing.key, { qty: existing.qty + qty });
@@ -573,16 +598,76 @@ function NewQuote() {
           <div className="space-y-4">
             <Card title={`Items · ${lines.length}`}>
               <div className="flex gap-2">
-                <input
-                  ref={quickRef}
-                  aria-label="Quick add"
-                  value={quick}
-                  onChange={(e) => setQuick(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && quickAdd()}
-                  placeholder='Quick add: "63 6 2" (mm, PN, rolls) · "pe80 90 8 300m" · "cut 50 6 40m" · "spr 10"   ( / )'
-                  className={`${inputCls} h-11 font-mono text-sm`}
-                />
-                <Button variant="outline" className="h-11 shrink-0 rounded-xl" onClick={quickAdd}>
+                <div className="relative min-w-0 flex-1">
+                  <input
+                    ref={quickRef}
+                    aria-label="Quick add"
+                    role="combobox"
+                    aria-expanded={suggestions.length > 0}
+                    aria-controls="quick-suggestions"
+                    autoComplete="off"
+                    value={quick}
+                    onChange={(e) => {
+                      setQuick(e.target.value);
+                      setQi(0);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setQi((i) => Math.min(i + 1, suggestions.length - 1));
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setQi((i) => Math.max(i - 1, 0));
+                      } else if (e.key === "Enter") {
+                        e.preventDefault();
+                        quickAdd();
+                      } else if (e.key === "Escape") setQuick("");
+                    }}
+                    placeholder="Quick add: brand OD PN PE roll/cut, qty: tarko 63 6 pe63 roll x2 · 90 8 300m · sprinkler x10   ( / )"
+                    className={`${inputCls} h-11 text-sm`}
+                  />
+                  {suggestions.length > 0 && (
+                    <ul
+                      id="quick-suggestions"
+                      role="listbox"
+                      className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
+                    >
+                      {suggestions.map((s, i) => (
+                        <li key={s.p.id} role="option" aria-selected={i === qi}>
+                          <button
+                            type="button"
+                            onMouseEnter={() => setQi(i)}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              quickAdd(i);
+                            }}
+                            className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${i === qi ? "bg-primary/10" : ""}`}
+                          >
+                            <span className="min-w-0 truncate">
+                              <b>{(s.brand ?? brands.data?.find((b) => b.id === brandId))?.name}</b>{" "}
+                              {suggestLabel(s.p)}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {fmtNum(s.qty)} {UNIT_LABELS[s.p.unit as Unit]} ·{" "}
+                              <b className="text-foreground">
+                                ₹{fmtNum(s.p.weight_kg * rateOf(s.p.rate_group_id))}/
+                                {UNIT_LABELS[s.p.unit as Unit]}
+                              </b>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                      <li className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+                        ↑ ↓ to choose · Enter to add · x2 = 2 rolls · 300m = metres
+                      </li>
+                    </ul>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  className="h-11 shrink-0 rounded-xl"
+                  onClick={() => quickAdd()}
+                >
                   Add
                 </Button>
               </div>

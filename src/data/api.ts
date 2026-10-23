@@ -16,6 +16,7 @@ import {
   rates,
   brand_raw,
   terms,
+  activities,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -554,7 +555,7 @@ export const listQuotes = createServerFn({ method: "GET" })
     return rows.map(({ q, brand, customer }) => ({
       id: q.id,
       quote_no: q.quote_no,
-      status: q.status,
+      status: q.stage,
       quote_date: q.quote_date,
       brand_name: brand,
       customer_id: q.customer_id,
@@ -691,15 +692,114 @@ export const createQuote = createServerFn({ method: "POST" })
 
 export const setQuoteStatus = createServerFn({ method: "POST" })
   .middleware([authed])
-  .validator(z.object({ id: z.string(), status: z.enum(["draft", "sent", "won", "lost"]) }))
+  .validator(
+    z.object({ id: z.string(), status: z.enum(["draft", "sent", "negotiation", "won", "lost"]) }),
+  )
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    const [q] = await db
+      .select({ stage: quotes.stage, customer_id: quotes.customer_id })
+      .from(quotes)
+      .where(eq(quotes.id, data.id));
+    if (!q) throw new Error("Quote not found");
+    if (q.stage === data.status) return { ok: true };
+    await db.batch([
+      db
+        .update(quotes)
+        .set({
+          stage: data.status,
+          status: data.status === "negotiation" ? "sent" : data.status,
+          updated_at: new Date().toISOString(),
+        })
+        .where(eq(quotes.id, data.id)),
+      // stage moves are part of the deal's history
+      db
+        .insert(activities)
+        .values({
+          quote_id: data.id,
+          customer_id: q.customer_id,
+          kind: "note",
+          text: `Moved to ${data.status}`,
+          created_by: context.user,
+        }),
+    ]);
+    return { ok: true };
+  });
+
+// ---------- activities & follow-ups ----------
+export const listActivities = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .validator(z.object({ quoteId: z.string() }))
+  .handler(async ({ data }) =>
+    (await getDb())
+      .select()
+      .from(activities)
+      .where(eq(activities.quote_id, data.quoteId))
+      .orderBy(desc(activities.created_at)),
+  );
+
+export const addActivity = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(
+    z.object({
+      quoteId: z.string(),
+      kind: z.enum(["call", "visit", "whatsapp", "email", "note", "followup"]),
+      text: opt,
+      dueDate: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .nullable(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    const [q] = await db
+      .select({ customer_id: quotes.customer_id })
+      .from(quotes)
+      .where(eq(quotes.id, data.quoteId));
+    if (!q) throw new Error("Quote not found");
+    await db.insert(activities).values({
+      quote_id: data.quoteId,
+      customer_id: q.customer_id,
+      kind: data.kind,
+      text: data.text ?? null,
+      due_date: data.dueDate,
+      created_by: context.user,
+    });
+    return { ok: true };
+  });
+
+export const setActivityDone = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(z.object({ id: z.string(), done: z.boolean() }))
   .handler(async ({ data }) => {
     await (
       await getDb()
     )
-      .update(quotes)
-      .set({ status: data.status, updated_at: new Date().toISOString() })
-      .where(eq(quotes.id, data.id));
+      .update(activities)
+      .set({ done: data.done ? 1 : 0 })
+      .where(eq(activities.id, data.id));
     return { ok: true };
+  });
+
+// Open follow-ups across all deals (due date ascending), for the dashboard and pipeline cards.
+export const listFollowUps = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .handler(async () => {
+    const db = await getDb();
+    return db
+      .select({
+        a: activities,
+        quote_no: quotes.quote_no,
+        customer: customers.name,
+        phone: customers.phone,
+      })
+      .from(activities)
+      .leftJoin(quotes, eq(quotes.id, activities.quote_id))
+      .leftJoin(customers, eq(customers.id, activities.customer_id))
+      .where(and(eq(activities.done, 0), sql`${activities.due_date} is not null`))
+      .orderBy(asc(activities.due_date))
+      .limit(200);
   });
 
 export const deleteQuote = createServerFn({ method: "POST" })

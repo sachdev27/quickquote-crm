@@ -122,6 +122,7 @@ export const quotes = sqliteTable("quotes", {
   non_isi: integer("non_isi").notNull().default(0),
   quote_date: text("quote_date").notNull(),
   status: text("status").notNull().default("draft"),
+  stage: text("stage").notNull().default("draft"),
   igst: integer("igst").notNull().default(0),
   extra_charges: real("extra_charges").notNull().default(0),
   notes: text("notes"),
@@ -147,4 +148,16 @@ export const quote_items = sqliteTable("quote_items", {
   rate_kg: real("rate_kg").notNull().default(0),
   unit_price: real("unit_price").notNull(),
   gst_rate: real("gst_rate").notNull().default(18),
+});
+
+export const activities = sqliteTable("activities", {
+  id: id(),
+  quote_id: text("quote_id"),
+  customer_id: text("customer_id"),
+  kind: text("kind").notNull(),
+  text: text("text"),
+  due_date: text("due_date"),
+  done: integer("done").notNull().default(0),
+  created_by: text("created_by"),
+  created_at: now(),
 });

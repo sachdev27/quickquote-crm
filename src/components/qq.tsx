@@ -134,6 +134,7 @@ export function Stepper({
 const STATUS_STYLE: Record<string, string> = {
   draft: "bg-secondary text-secondary-foreground",
   sent: "bg-sky-100 text-sky-800",
+  negotiation: "bg-amber-100 text-amber-800",
   won: "bg-emerald-100 text-emerald-800",
   lost: "bg-rose-100 text-rose-800",
 };

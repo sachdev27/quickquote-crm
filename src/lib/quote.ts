@@ -25,12 +25,16 @@ export interface Brand {
   default_preset_id: string | null;
 }
 
+// Pipeline stages (deal flow). "negotiation" lives in quotes.stage; quotes.status mirrors it as "sent".
 export const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
   sent: "Sent",
+  negotiation: "Negotiation",
   won: "Won",
   lost: "Lost",
 };
+export const STAGES = ["draft", "sent", "negotiation", "won", "lost"] as const;
+export type Stage = (typeof STAGES)[number];
 
 // ₹/kg = raw + production + transport + margin (margin as % of that cost, or flat ₹/kg). GST goes on top.
 export interface Rate {
