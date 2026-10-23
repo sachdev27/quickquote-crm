@@ -23,6 +23,7 @@ export interface Brand {
   upi_id: string | null;
   terms: string | null;
   default_preset_id: string | null;
+  logo: string | null;
 }
 
 // Pipeline stages (deal flow). "negotiation" lives in quotes.stage; quotes.status mirrors it as "sent".

@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { LOGO_MAX_CHARS, LOGO_RE } from "@/lib/logo";
 import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { computeTotals, nextQuoteNo, type Line } from "@/lib/quote";
@@ -73,6 +74,13 @@ export const saveBrand = createServerFn({ method: "POST" })
       upi_id: opt,
       terms: opt,
       default_preset_id: opt,
+      // Empty string clears the logo.
+      logo: z
+        .string()
+        .max(LOGO_MAX_CHARS)
+        .refine((v) => v === "" || LOGO_RE.test(v), "Logo must be an SVG, PNG, JPG or WebP image")
+        .transform((v) => v || null)
+        .optional(),
     }),
   )
   .handler(async ({ data }) => {

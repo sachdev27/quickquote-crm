@@ -110,16 +110,69 @@
   }
 }
 
-/* Print: only the invoice shows */
+/* Quotation sheet: an A4 page (ISO 216, 210 × 297 mm). Fixed paper palette in light and dark mode.
+   Body text 8.5–9pt for a dense commercial document, line height ~135%. */
+.quote-doc {
+  --qd-accent: oklch(0.38 0.08 240);
+  --qd-soft: oklch(0.975 0.006 240);
+  --qd-ink: oklch(0.2 0.02 250);
+  --qd-text: oklch(0.33 0.015 250);
+  --qd-muted: oklch(0.52 0.015 250);
+  --qd-line: oklch(0.88 0.008 250);
+  box-sizing: border-box;
+  width: 210mm;
+  min-height: 297mm;
+  padding: 10mm 14mm 12mm;
+  background: white;
+  color: var(--qd-text);
+  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 9pt;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums lining-nums;
+  color-scheme: light;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 4px 16px rgb(0 0 0 / 0.08);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.quote-doc thead {
+  display: table-header-group;
+}
+
+/* Print: only the quotation shows, as A4 with page numbers in the bottom margin */
+@page {
+  size: A4;
+  margin: 10mm 14mm 12mm;
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: "IBM Plex Sans", Arial, sans-serif;
+    font-size: 7pt;
+    color: #6b7280;
+  }
+}
 @media print {
   .no-print {
     display: none !important;
   }
-  body {
-    background: white;
+  body,
+  :has(.print-sheet) {
+    background: white !important;
   }
-  .print-sheet {
-    box-shadow: none !important;
-    border: none !important;
+  /* The app shell around the sheet must not add space: the @page margins are the only margins. */
+  :has(.print-sheet) {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    gap: 0 !important;
+  }
+  .a4-zoom {
+    zoom: 1 !important;
+  }
+  .quote-doc {
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    box-shadow: none;
   }
 }

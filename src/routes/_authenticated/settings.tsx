@@ -22,6 +22,7 @@ import {
   deleteUser,
 } from "@/data/api";
 import { useMe } from "@/hooks/use-me";
+import { prepareLogo } from "@/lib/logo";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({ meta: [{ title: "Settings — Tarko CRM" }] }),
@@ -42,6 +43,7 @@ const FIELDS = [
   "upi_id",
   "terms",
   "default_preset_id",
+  "logo",
 ] as const;
 type Key = (typeof FIELDS)[number];
 type Form = Record<Key, string> & { id?: string };
@@ -136,6 +138,7 @@ function SettingsAdmin() {
         <Letterhead f={f} />
         <div className="space-y-4 @2xl:grid @2xl:grid-cols-2 @2xl:items-start @2xl:gap-4 @2xl:space-y-0">
           <Card title="Letterhead">
+            <LogoField value={f.logo} onChange={(logo) => setF({ ...f, logo })} />
             <div className="grid grid-cols-[1fr_6rem] gap-2">
               <Field label="Brand name">
                 <input value={f.name} onChange={set("name")} className={inputCls} />
@@ -353,8 +356,14 @@ function Letterhead({ f }: { f: Form }) {
       </p>
       <div className="flex justify-between gap-4 text-sm">
         <div className="min-w-0">
-          <p className="text-xl font-bold leading-tight">{f.name || "Brand name"}</p>
-          {f.tagline && <p className="text-muted-foreground">{f.tagline}</p>}
+          {f.logo ? (
+            <img src={f.logo} alt={f.name} className="mb-1 max-h-14 max-w-56 object-contain" />
+          ) : (
+            <>
+              <p className="text-xl font-bold leading-tight">{f.name || "Brand name"}</p>
+              {f.tagline && <p className="text-muted-foreground">{f.tagline}</p>}
+            </>
+          )}
           {f.address && <p className="whitespace-pre-line text-muted-foreground">{f.address}</p>}
           {f.phone && <p className="text-muted-foreground">{f.phone}</p>}
           <p className="text-muted-foreground">
@@ -368,6 +377,58 @@ function Letterhead({ f }: { f: Form }) {
           <p className="font-semibold">{(f.code || "XXX").toUpperCase()}-2610-001</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Logo upload: replaces the brand name + tagline at the top of printed quotes.
+function LogoField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      onChange(await prepareLogo(file));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not read the image");
+    }
+  };
+  return (
+    <div>
+      <span className="mb-1 block text-xs font-medium text-muted-foreground">Logo</span>
+      <div className="flex items-center gap-3">
+        <div className="grid h-16 w-40 shrink-0 place-items-center overflow-hidden rounded-xl border border-dashed border-border bg-white p-2">
+          {value ? (
+            <img src={value} alt="Brand logo" className="max-h-full max-w-full object-contain" />
+          ) : (
+            <span className="text-xs text-muted-foreground">No logo</span>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="inline-flex h-9 cursor-pointer items-center rounded-lg border border-input px-3 text-sm font-medium hover:bg-accent">
+            {value ? "Replace" : "Upload"}
+            <input
+              type="file"
+              accept="image/svg+xml,image/png,image/jpeg,image/webp"
+              onChange={pick}
+              className="sr-only"
+            />
+          </label>
+          {value && (
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              className="text-left text-xs text-muted-foreground underline"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        SVG stays sharp at any size; PNG/JPG are resized to 600 px. Shown instead of the name and
+        tagline on quotes. Save the brand to apply.
+      </p>
     </div>
   );
 }
