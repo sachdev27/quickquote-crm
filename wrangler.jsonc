@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "tarko-crm",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "9fc7dc48-0d40-4e0d-a1e5-c3008483de64",
       "migrations_dir": "migrations",
     },
   ],
