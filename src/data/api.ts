@@ -18,6 +18,8 @@ import {
   terms,
   activities,
   users,
+  enquiries,
+  contacts,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -561,6 +563,8 @@ export const listQuotes = createServerFn({ method: "GET" })
       brand_name: brand,
       customer_id: q.customer_id,
       customer_name: customer,
+      created_by: q.created_by,
+      updated_at: q.updated_at,
       total: computeTotals(items.filter((i) => i.quote_id === q.id).map(toLine), q.extra_charges, {
         inclusive: false,
         igst: !!q.igst,
@@ -605,6 +609,7 @@ export const createQuote = createServerFn({ method: "POST" })
       nonIsi: z.boolean().default(false),
       terms: z.array(text.min(1)).max(30).default([]),
       newCustomer: z.object({ name: text.min(1), phone: opt, gstin: opt }).nullable(),
+      enquiryId: z.string().nullable().default(null),
       igst: z.boolean(),
       extra: money,
       notes: opt,
@@ -683,6 +688,19 @@ export const createQuote = createServerFn({ method: "POST" })
             }),
           ),
         ]);
+        if (data.enquiryId) {
+          // converting an enquiry: link it, and carry its call/visit history over to the quote
+          await db.batch([
+            db
+              .update(enquiries)
+              .set({ status: "converted", quote_id: quoteId, updated_at: new Date().toISOString() })
+              .where(eq(enquiries.id, data.enquiryId)),
+            db
+              .update(activities)
+              .set({ quote_id: quoteId })
+              .where(eq(activities.enquiry_id, data.enquiryId)),
+          ]);
+        }
         return { id: quoteId, quoteNo: nextQuoteNo(brand.code, n + i) };
       } catch (e) {
         if (!String(e).includes("UNIQUE") || i === 4) throw e;
@@ -728,12 +746,16 @@ export const setQuoteStatus = createServerFn({ method: "POST" })
 // ---------- activities & follow-ups ----------
 export const listActivities = createServerFn({ method: "GET" })
   .middleware([authed])
-  .validator(z.object({ quoteId: z.string() }))
+  .validator(z.object({ quoteId: z.string().optional(), enquiryId: z.string().optional() }))
   .handler(async ({ data }) =>
     (await getDb())
       .select()
       .from(activities)
-      .where(eq(activities.quote_id, data.quoteId))
+      .where(
+        data.quoteId
+          ? eq(activities.quote_id, data.quoteId)
+          : eq(activities.enquiry_id, data.enquiryId ?? ""),
+      )
       .orderBy(desc(activities.created_at)),
   );
 
@@ -741,7 +763,9 @@ export const addActivity = createServerFn({ method: "POST" })
   .middleware([authed])
   .validator(
     z.object({
-      quoteId: z.string(),
+      quoteId: z.string().optional(),
+      enquiryId: z.string().optional(),
+      customerId: z.string().nullable().optional(),
       kind: z.enum(["call", "visit", "whatsapp", "email", "note", "followup"]),
       text: opt,
       dueDate: z
@@ -752,14 +776,27 @@ export const addActivity = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const db = await getDb();
-    const [q] = await db
-      .select({ customer_id: quotes.customer_id })
-      .from(quotes)
-      .where(eq(quotes.id, data.quoteId));
-    if (!q) throw new Error("Quote not found");
+    // the customer comes from the quote / enquiry when there is one, so tasks show up on their history
+    let customerId = data.customerId ?? null;
+    if (data.quoteId) {
+      const [q] = await db
+        .select({ c: quotes.customer_id })
+        .from(quotes)
+        .where(eq(quotes.id, data.quoteId));
+      if (!q) throw new Error("Quote not found");
+      customerId = q.c;
+    } else if (data.enquiryId) {
+      const [e] = await db
+        .select({ c: enquiries.customer_id })
+        .from(enquiries)
+        .where(eq(enquiries.id, data.enquiryId));
+      if (!e) throw new Error("Enquiry not found");
+      customerId = e.c;
+    }
     await db.insert(activities).values({
-      quote_id: data.quoteId,
-      customer_id: q.customer_id,
+      quote_id: data.quoteId ?? null,
+      enquiry_id: data.enquiryId ?? null,
+      customer_id: customerId,
       kind: data.kind,
       text: data.text ?? null,
       due_date: data.dueDate,
@@ -790,11 +827,13 @@ export const listFollowUps = createServerFn({ method: "GET" })
       .select({
         a: activities,
         quote_no: quotes.quote_no,
+        enquiry: enquiries.title,
         customer: customers.name,
         phone: customers.phone,
       })
       .from(activities)
       .leftJoin(quotes, eq(quotes.id, activities.quote_id))
+      .leftJoin(enquiries, eq(enquiries.id, activities.enquiry_id))
       .leftJoin(customers, eq(customers.id, activities.customer_id))
       .where(and(eq(activities.done, 0), sql`${activities.due_date} is not null`))
       .orderBy(asc(activities.due_date))
@@ -851,5 +890,185 @@ export const deleteUser = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     if (data.email === context.user) throw new Error("You can't remove yourself.");
     await (await getDb()).delete(users).where(eq(users.email, data.email));
+    return { ok: true };
+  });
+
+// Every task with a due date: open ones plus those done in the last 30 days (Activities page).
+export const listTasks = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .handler(async () => {
+    const db = await getDb();
+    const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+    return db
+      .select({
+        a: activities,
+        quote_no: quotes.quote_no,
+        enquiry: enquiries.title,
+        customer: customers.name,
+        phone: customers.phone,
+      })
+      .from(activities)
+      .leftJoin(quotes, eq(quotes.id, activities.quote_id))
+      .leftJoin(enquiries, eq(enquiries.id, activities.enquiry_id))
+      .leftJoin(customers, eq(customers.id, activities.customer_id))
+      .where(
+        and(
+          sql`${activities.due_date} is not null`,
+          sql`(${activities.done} = 0 or ${activities.due_date} >= ${since})`,
+        ),
+      )
+      .orderBy(asc(activities.due_date))
+      .limit(500);
+  });
+
+// ---------- enquiries (deals before a quote) ----------
+export const listEnquiries = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .handler(async () =>
+    (await getDb())
+      .select({
+        e: enquiries,
+        customer: customers.name,
+        phone: customers.phone,
+        brand: brands.name,
+      })
+      .from(enquiries)
+      .leftJoin(customers, eq(customers.id, enquiries.customer_id))
+      .leftJoin(brands, eq(brands.id, enquiries.brand_id))
+      .orderBy(desc(enquiries.created_at))
+      .limit(300),
+  );
+
+export const saveEnquiry = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(
+    z.object({
+      id: z.string().optional(),
+      title: text.min(1),
+      need: opt,
+      expected_value: money,
+      brand_id: z.string().nullable(),
+      customer_id: z.string().nullable(),
+      newCustomer: z.object({ name: text.min(1), phone: opt }).nullable(),
+      followUp: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .nullable()
+        .default(null),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    let customerId = data.customer_id;
+    if (!customerId && data.newCustomer) {
+      const [c] = await db
+        .insert(customers)
+        .values(data.newCustomer)
+        .returning({ id: customers.id });
+      customerId = c?.id ?? null;
+    }
+    const row = {
+      title: data.title,
+      need: data.need ?? null,
+      expected_value: data.expected_value,
+      brand_id: data.brand_id,
+      customer_id: customerId,
+      updated_at: new Date().toISOString(),
+    };
+    if (data.id) {
+      await db.update(enquiries).set(row).where(eq(enquiries.id, data.id));
+      return { id: data.id };
+    }
+    const id = crypto.randomUUID();
+    await db.insert(enquiries).values({ ...row, id, created_by: context.user });
+    if (data.followUp)
+      await db.insert(activities).values({
+        enquiry_id: id,
+        customer_id: customerId,
+        kind: "followup",
+        text: `Follow up: ${data.title}`,
+        due_date: data.followUp,
+        created_by: context.user,
+      });
+    return { id };
+  });
+
+export const setEnquiryStatus = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(z.object({ id: z.string(), status: z.enum(["open", "lost"]) }))
+  .handler(async ({ data }) => {
+    await (
+      await getDb()
+    )
+      .update(enquiries)
+      .set({ status: data.status, updated_at: new Date().toISOString() })
+      .where(eq(enquiries.id, data.id));
+    return { ok: true };
+  });
+
+export const deleteEnquiry = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.batch([
+      db.delete(activities).where(eq(activities.enquiry_id, data.id)),
+      db.delete(enquiries).where(eq(enquiries.id, data.id)),
+    ]);
+    return { ok: true };
+  });
+
+// ---------- contacts (people at a customer company) ----------
+export const listContacts = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .validator(z.object({ customerId: z.string().optional() }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const q = db.select().from(contacts);
+    return (data.customerId ? q.where(eq(contacts.customer_id, data.customerId)) : q).orderBy(
+      desc(contacts.is_primary),
+      asc(contacts.name),
+    );
+  });
+
+export const saveContact = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(
+    z.object({
+      id: z.string().optional(),
+      customer_id: z.string(),
+      name: text.min(1),
+      role: opt,
+      phone: opt,
+      email: opt,
+      is_primary: z.boolean(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const { id, is_primary, ...rest } = data;
+    const row = {
+      ...rest,
+      role: rest.role ?? null,
+      phone: rest.phone ?? null,
+      email: rest.email ?? null,
+      is_primary: is_primary ? 1 : 0,
+    };
+    // one primary contact per company
+    if (is_primary)
+      await db
+        .update(contacts)
+        .set({ is_primary: 0 })
+        .where(eq(contacts.customer_id, data.customer_id));
+    if (id) await db.update(contacts).set(row).where(eq(contacts.id, id));
+    else await db.insert(contacts).values(row);
+    return { ok: true };
+  });
+
+export const deleteContact = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }) => {
+    await (await getDb()).delete(contacts).where(eq(contacts.id, data.id));
     return { ok: true };
   });

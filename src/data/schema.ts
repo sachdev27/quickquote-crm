@@ -153,6 +153,7 @@ export const quote_items = sqliteTable("quote_items", {
 export const activities = sqliteTable("activities", {
   id: id(),
   quote_id: text("quote_id"),
+  enquiry_id: text("enquiry_id"),
   customer_id: text("customer_id"),
   kind: text("kind").notNull(),
   text: text("text"),
@@ -166,5 +167,32 @@ export const users = sqliteTable("users", {
   email: text("email").primaryKey(),
   name: text("name"),
   role: text("role").notNull(),
+  created_at: now(),
+});
+
+export const enquiries = sqliteTable("enquiries", {
+  id: id(),
+  customer_id: text("customer_id"),
+  brand_id: text("brand_id"),
+  title: text("title").notNull(),
+  need: text("need"),
+  expected_value: real("expected_value").notNull().default(0),
+  status: text("status").notNull().default("open"),
+  quote_id: text("quote_id"),
+  created_by: text("created_by"),
+  created_at: now(),
+  updated_at: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const contacts = sqliteTable("contacts", {
+  id: id(),
+  customer_id: text("customer_id").notNull(),
+  name: text("name").notNull(),
+  role: text("role"),
+  phone: text("phone"),
+  email: text("email"),
+  is_primary: integer("is_primary").notNull().default(0),
   created_at: now(),
 });

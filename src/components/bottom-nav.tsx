@@ -1,10 +1,22 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutList, Users, Plus, Settings, Tag } from "lucide-react";
+import {
+  BarChart3,
+  CalendarCheck,
+  LayoutList,
+  Plus,
+  Search,
+  Settings,
+  Tag,
+  Users,
+} from "lucide-react";
+import { CommandPalette, openSearch } from "@/components/command-palette";
 import { cn } from "@/lib/utils";
 import { useMe } from "@/hooks/use-me";
 
 const LINKS = [
   { to: "/dashboard", label: "Quotes", Icon: LayoutList },
+  { to: "/activities", label: "Activities", Icon: CalendarCheck },
+  { to: "/insights", label: "Dashboard", Icon: BarChart3 },
   { to: "/customers", label: "Customers", Icon: Users },
   { to: "/products", label: "Products", Icon: Tag },
   { to: "/settings", label: "Settings", Icon: Settings },
@@ -18,7 +30,6 @@ function useActive() {
 // Mobile: bottom tab bar with a centre "New quote" button. Desktop: nav lives in PageShell's header.
 export function BottomNav() {
   const active = useActive();
-  const { isAdmin } = useMe();
   const item = (on: boolean) =>
     cn(
       "flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-medium transition-colors",
@@ -31,9 +42,9 @@ export function BottomNav() {
           <LayoutList className="h-5 w-5" />
           Quotes
         </Link>
-        <Link to="/customers" className={item(active("/customers"))}>
-          <Users className="h-5 w-5" />
-          Customers
+        <Link to="/activities" className={item(active("/activities"))}>
+          <CalendarCheck className="h-5 w-5" />
+          Activities
         </Link>
         <Link to="/new-quote" className={item(active("/new-quote"))}>
           <span className="-mt-4 flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg">
@@ -41,12 +52,10 @@ export function BottomNav() {
           </span>
           <span className="-mt-1">New quote</span>
         </Link>
-        {isAdmin && (
-          <Link to="/products" className={item(active("/products"))}>
-            <Tag className="h-5 w-5" />
-            Products
-          </Link>
-        )}
+        <Link to="/customers" className={item(active("/customers"))}>
+          <Users className="h-5 w-5" />
+          Customers
+        </Link>
         <Link to="/settings" className={item(active("/settings"))}>
           <Settings className="h-5 w-5" />
           Settings
@@ -94,6 +103,15 @@ export function PageShell({
         >
           <Plus className="h-5 w-5" />
         </Link>
+        <button
+          type="button"
+          title="Search (⌘K)"
+          onClick={openSearch}
+          className="mb-1 flex w-16 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+        >
+          <Search className="h-5 w-5" />
+          ⌘K
+        </button>
         {links.map(({ to, label, Icon }) => (
           <Link
             key={to}
@@ -120,6 +138,14 @@ export function PageShell({
             )}
           >
             <h1 className="text-lg font-bold text-foreground">{title}</h1>
+            <button
+              type="button"
+              aria-label="Search"
+              onClick={openSearch}
+              className="ml-auto rounded-full p-2 text-muted-foreground hover:bg-secondary lg:hidden"
+            >
+              <Search className="h-5 w-5" />
+            </button>
             <nav className="hidden items-center gap-1 md:flex lg:hidden">
               {links.map(({ to, label, Icon }) => (
                 <Link key={to} to={to} className={navLink(to, active(to))}>
@@ -154,6 +180,7 @@ export function PageShell({
         </div>
       )}
       <BottomNav />
+      <CommandPalette />
     </div>
   );
 }

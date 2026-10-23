@@ -15,6 +15,7 @@ import {
   listPricing,
   listProducts,
   listTerms,
+  listEnquiries,
   saveProduct,
 } from "@/data/api";
 import { LAST_BRAND, LAST_PRESET, newPipe, normalizePn, shortName } from "@/lib/catalog";
@@ -41,6 +42,8 @@ import { useIsDesktop } from "@/hooks/use-mobile";
 import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
 
 export const Route = createFileRoute("/_authenticated/new-quote")({
+  validateSearch: (s: Record<string, unknown>): { enquiry?: string } =>
+    typeof s["enquiry"] === "string" ? { enquiry: s["enquiry"] } : {},
   head: () => ({ meta: [{ title: "New quote — Tarko CRM" }] }),
   component: NewQuote,
 });
@@ -229,6 +232,7 @@ function NewQuote() {
           extra: num(extra),
           notes,
           terms: selectedTerms,
+          enquiryId: fromEnquiry?.e.id ?? null,
           lines: out,
         },
       });
@@ -247,6 +251,7 @@ function NewQuote() {
       }
       qc.invalidateQueries({ queryKey: ["quotes"] });
       qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["enquiries"] });
       navigate({ to: "/quotes/$id", params: { id } });
     } catch (e) {
       tab?.close();
@@ -466,6 +471,29 @@ function NewQuote() {
     setCustomerId(hit?.id ?? "");
     setNc({ ...nc, name: hit ? "" : v });
   };
+
+  // Started from an enquiry: pre-fill customer, brand and notes once data is in.
+  const { enquiry: enquiryId } = Route.useSearch();
+  const enqs = useQuery({
+    queryKey: ["enquiries"],
+    queryFn: () => listEnquiries(),
+    enabled: !!enquiryId,
+    staleTime: 30_000,
+  });
+  const fromEnquiry = enqs.data?.find((x) => x.e.id === enquiryId);
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (!fromEnquiry || prefilled || !customers.data || !brands.data) return;
+    const c = customers.data.find((x) => x.id === fromEnquiry.e.customer_id);
+    if (c) {
+      setCustText(custLabel(c));
+      setCustomerId(c.id);
+    }
+    if (fromEnquiry.e.brand_id) setBrandId(fromEnquiry.e.brand_id);
+    if (fromEnquiry.e.need) setNotes(`Enquiry: ${fromEnquiry.e.title}\n${fromEnquiry.e.need}`);
+    setPrefilled(true);
+    toast.message(`Quoting enquiry: ${fromEnquiry.e.title}`);
+  }, [fromEnquiry, customers.data, brands.data, prefilled]);
 
   const selectCls =
     "h-11 w-full rounded-xl border border-input bg-background px-3 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";

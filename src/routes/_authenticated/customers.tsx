@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, Phone, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -7,11 +7,22 @@ import { PageShell } from "@/components/bottom-nav";
 import { Field, inputCls } from "@/components/qq";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
-import { addCustomer, deleteCustomer, listCustomers, listQuotes, updateCustomer } from "@/data/api";
+import {
+  addCustomer,
+  deleteContact,
+  deleteCustomer,
+  listContacts,
+  listCustomers,
+  listQuotes,
+  saveContact,
+  updateCustomer,
+} from "@/data/api";
 import { StatusPill } from "@/components/qq";
 import { STATUS_LABELS, fmtMoney } from "@/lib/quote";
 
 export const Route = createFileRoute("/_authenticated/customers")({
+  validateSearch: (s: Record<string, unknown>): { id?: string } =>
+    typeof s["id"] === "string" ? { id: s["id"] } : {},
   head: () => ({ meta: [{ title: "Customers — Tarko CRM" }] }),
   component: Customers,
 });
@@ -40,7 +51,23 @@ function Customers() {
   });
   const [f, setF] = useState<Form | null>(null);
   const [q, setQ] = useState("");
-  const [sel, setSel] = useState("");
+  const search = Route.useSearch();
+  const [sel, setSel] = useState(search.id ?? "");
+  // deep link from search: select on desktop, open the editor on phones
+  useEffect(() => {
+    if (!search.id || !data) return;
+    setSel(search.id);
+    const c = data.find((x) => x.id === search.id);
+    if (c && typeof window !== "undefined" && window.innerWidth < 1024)
+      setF({
+        id: c.id,
+        name: c.name,
+        phone: c.phone ?? "",
+        address: c.address ?? "",
+        gstin: c.gstin ?? "",
+        notes: c.notes ?? "",
+      });
+  }, [search.id, data]);
   const quotes = useQuery({ queryKey: ["quotes"], queryFn: () => listQuotes(), staleTime: 30_000 });
   const history = (id: string) => (quotes.data ?? []).filter((x) => x.customer_id === id);
 
@@ -211,6 +238,7 @@ function Customers() {
                       Edit
                     </Button>
                   </div>
+                  <ContactsList customerId={current.id} />
                   {current.notes && (
                     <p className="whitespace-pre-line rounded-xl bg-secondary p-3 text-sm">
                       {current.notes}
@@ -301,6 +329,7 @@ function Customers() {
                 <Field label="Address">
                   <input value={f.address} onChange={set("address")} className={inputCls} />
                 </Field>
+                {f.id && <ContactsList customerId={f.id} />}
                 <Field label="Notes">
                   <textarea
                     value={f.notes}
@@ -330,5 +359,183 @@ function Customers() {
         </DrawerContent>
       </Drawer>
     </PageShell>
+  );
+}
+
+// People at this customer company: name, role, phone, email; one primary.
+function ContactsList({ customerId }: { customerId: string }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["contacts", customerId],
+    queryFn: () => listContacts({ data: { customerId } }),
+  });
+  const [f, setF] = useState<null | {
+    id?: string;
+    name: string;
+    role: string;
+    phone: string;
+    email: string;
+    is_primary: boolean;
+  }>(null);
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["contacts", customerId] });
+    qc.invalidateQueries({ queryKey: ["contacts", "all"] });
+  };
+  async function save() {
+    if (!f?.name.trim()) return void toast.error("Contact name is required");
+    try {
+      await saveContact({
+        data: {
+          ...(f.id ? { id: f.id } : {}),
+          customer_id: customerId,
+          name: f.name,
+          role: f.role,
+          phone: f.phone,
+          email: f.email,
+          is_primary: f.is_primary,
+        },
+      });
+      refresh();
+      setF(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    }
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Contact people · {data?.length ?? 0}
+        </p>
+        <button
+          type="button"
+          className="text-xs font-semibold text-primary"
+          onClick={() =>
+            setF({ name: "", role: "", phone: "", email: "", is_primary: !data?.length })
+          }
+        >
+          + Add
+        </button>
+      </div>
+      <ul className="space-y-1.5">
+        {data?.map((c) => (
+          <li
+            key={c.id}
+            className="flex items-center gap-2 rounded-xl border border-border p-2 text-sm"
+          >
+            <button
+              type="button"
+              className="min-w-0 flex-1 text-left"
+              onClick={() =>
+                setF({
+                  id: c.id,
+                  name: c.name,
+                  role: c.role ?? "",
+                  phone: c.phone ?? "",
+                  email: c.email ?? "",
+                  is_primary: !!c.is_primary,
+                })
+              }
+            >
+              <span className="block truncate font-medium">
+                {c.name}
+                {c.is_primary ? " · primary" : ""}
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {[c.role, c.phone, c.email].filter(Boolean).join(" · ")}
+              </span>
+            </button>
+            {c.phone && (
+              <>
+                <a
+                  href={`tel:${c.phone}`}
+                  aria-label={`Call ${c.name}`}
+                  className="rounded-full bg-secondary p-1.5 text-primary"
+                >
+                  <Phone className="h-3.5 w-3.5" />
+                </a>
+                <a
+                  href={wa(c.phone)}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`WhatsApp ${c.name}`}
+                  className="rounded-full bg-secondary p-1.5 text-primary"
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                </a>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      {f && (
+        <div className="space-y-2 rounded-xl border border-primary/40 bg-primary/5 p-2.5">
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={f.name}
+              onChange={(e) => setF({ ...f, name: e.target.value })}
+              placeholder="Name"
+              className={`${inputCls} h-10`}
+            />
+            <input
+              value={f.role}
+              onChange={(e) => setF({ ...f, role: e.target.value })}
+              placeholder="Role (purchase, owner…)"
+              className={`${inputCls} h-10`}
+            />
+            <input
+              value={f.phone}
+              onChange={(e) => setF({ ...f, phone: e.target.value })}
+              inputMode="tel"
+              placeholder="Phone"
+              className={`${inputCls} h-10`}
+            />
+            <input
+              value={f.email}
+              onChange={(e) => setF({ ...f, email: e.target.value })}
+              placeholder="Email"
+              className={`${inputCls} h-10`}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={f.is_primary}
+              onChange={(e) => setF({ ...f, is_primary: e.target.checked })}
+            />{" "}
+            Primary contact
+          </label>
+          <div className="flex gap-2">
+            {f.id && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-9 rounded-lg text-destructive"
+                onClick={async () => {
+                  if (confirm(`Remove ${f.name}?`)) {
+                    await deleteContact({ data: { id: f.id! } });
+                    refresh();
+                    setF(null);
+                  }
+                }}
+              >
+                Remove
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-9 rounded-lg"
+              onClick={() => setF(null)}
+            >
+              Cancel
+            </Button>
+            <Button type="button" className="h-9 flex-1 rounded-lg" onClick={save}>
+              Save contact
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

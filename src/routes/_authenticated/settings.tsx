@@ -69,6 +69,7 @@ function SettingsPage() {
     return (
       <PageShell title="Settings">
         <div className="mx-auto max-w-md space-y-4">
+          <Shortcuts isAdmin={false} />
           <AccountCard email={me.email} role={me.role} />
         </div>
       </PageShell>
@@ -312,6 +313,7 @@ function SettingsAdmin() {
 
           <TermsLibrary />
 
+          <Shortcuts isAdmin />
           <UsersSection me={me.email} />
           <AccountCard email={me.email} role={me.role ?? "admin"} />
         </div>
@@ -477,6 +479,28 @@ function TermsLibrary() {
           </li>
         )}
       </ul>
+    </section>
+  );
+}
+
+// Phone tab bar has no room for these; Settings doubles as the "more" menu.
+function Shortcuts({ isAdmin }: { isAdmin: boolean }) {
+  const items = [
+    { to: "/insights" as const, label: "Dashboard" },
+    { to: "/price-list" as const, label: "Price list" },
+    ...(isAdmin ? [{ to: "/products" as const, label: "Products & pricing" }] : []),
+  ];
+  return (
+    <section className="grid grid-cols-3 gap-2 lg:hidden">
+      {items.map((i) => (
+        <Link
+          key={i.to}
+          to={i.to}
+          className="rounded-2xl border border-border bg-card p-3 text-center text-sm font-semibold hover:bg-secondary"
+        >
+          {i.label}
+        </Link>
+      ))}
     </section>
   );
 }
