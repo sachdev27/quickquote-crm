@@ -207,10 +207,10 @@
     display: table-footer-group;
   }
   .qd-pad-top {
-    height: 10mm;
+    height: 8mm;
   }
   .qd-pad-bottom {
-    height: 12mm;
+    height: 9mm;
   }
   .print-sheet {
     box-shadow: none !important;

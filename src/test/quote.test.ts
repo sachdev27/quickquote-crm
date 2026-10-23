@@ -4,6 +4,7 @@ import { pipeKgPerM, sdrFor } from "@/lib/weights";
 import { pipeSpec } from "@/lib/pipe-spec";
 import { stateOf, validUntil } from "@/lib/quote-doc";
 import { parseRoll, withRolls } from "@/lib/rolls";
+import { fyOf, invoiceNoOf, todayIST } from "@/lib/invoice";
 import { describeChanges, type AuditSnap } from "@/lib/audit";
 import { ageLabel, daysSince, hueOf, initialsOf, staleness } from "@/lib/board";
 
@@ -206,5 +207,23 @@ describe("board helpers", () => {
     expect(initialsOf(null)).toBe("?");
     expect(hueOf("Ramesh")).toBe(hueOf("Ramesh"));
     expect(hueOf("Ramesh")).toBeLessThan(360);
+  });
+});
+
+describe("invoice numbering", () => {
+  it("uses the April-March financial year", () => {
+    expect(fyOf("2026-10-23")).toBe("2627");
+    expect(fyOf("2027-03-31")).toBe("2627");
+    expect(fyOf("2027-04-01")).toBe("2728");
+    expect(fyOf("2026-01-15")).toBe("2526");
+  });
+  it("builds a number within 16 characters", () => {
+    expect(invoiceNoOf("TRK", "2026-10-23", 7)).toBe("TRK/2627/0007");
+    expect(invoiceNoOf("ABCDEF", "2026-10-23", 12345).length).toBeLessThanOrEqual(17);
+    expect(invoiceNoOf("ABCDEF", "2026-10-23", 1234).length).toBeLessThanOrEqual(16);
+  });
+  it("converts the clock to the Indian date", () => {
+    expect(todayIST(Date.parse("2026-10-23T20:00:00Z"))).toBe("2026-10-24"); // 1:30 am IST next day
+    expect(todayIST(Date.parse("2026-10-23T10:00:00Z"))).toBe("2026-10-23");
   });
 });

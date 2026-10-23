@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   BarChart3,
   CalendarCheck,
+  FileText,
   LayoutList,
   Plus,
   Search,
@@ -16,6 +17,7 @@ import { useMe } from "@/hooks/use-me";
 const LINKS = [
   { to: "/dashboard", label: "Quotes", Icon: LayoutList },
   { to: "/insights", label: "Dashboard", Icon: BarChart3 },
+  { to: "/invoices", label: "Invoices", Icon: FileText },
   { to: "/activities", label: "Activities", Icon: CalendarCheck },
   { to: "/customers", label: "Customers", Icon: Users },
   { to: "/products", label: "Products", Icon: Tag },

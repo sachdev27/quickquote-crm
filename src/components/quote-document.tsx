@@ -5,7 +5,22 @@ import { fmtAmt, fmtDate, stateOf, validUntil } from "@/lib/quote-doc";
 import { PipeSection } from "@/components/pipe-section";
 import type { getQuote } from "@/data/api";
 
-type QuoteData = Awaited<ReturnType<typeof getQuote>>;
+type Loaded = Awaited<ReturnType<typeof getQuote>>;
+// What the document needs; a quote or a tax invoice (built from its snapshot) can supply it.
+export type DocData = {
+  quote: Pick<
+    Loaded["quote"],
+    "quote_no" | "quote_date" | "igst" | "extra_charges" | "terms" | "notes"
+  >;
+  brand: Loaded["brand"];
+  customer: {
+    name: string;
+    address: string | null;
+    phone: string | null;
+    gstin: string | null;
+  } | null;
+  lines: Line[];
+};
 
 // A4 is 210 × 297 mm (ISO 216). At 96 css px per inch that is ~794 px wide.
 const A4_PX = (210 / 25.4) * 96;
@@ -42,7 +57,16 @@ function A4Frame({ children }: { children: ReactNode }) {
 
 // The printable proforma quotation, laid out as an A4 page. Particulars follow CGST Rule 46
 // (supplier, number, date, recipient with GSTIN and state, HSN, qty, unit, value, rate and tax).
-export function QuoteDocument({ data }: { data: QuoteData }) {
+// With `invoice`, the same sheet prints as a TAX INVOICE (quote_no / quote_date carry the invoice
+// number and date); quoteNo is the quotation it was issued against.
+export function QuoteDocument({
+  data,
+  invoice,
+}: {
+  data: DocData;
+  invoice?: { quoteNo: string | null };
+}) {
+  const isInv = !!invoice;
   const { quote: q, brand, customer, lines } = data;
   const igst = !!q.igst;
   // Quotes save the terms they were sent with; older quotes fall back to the brand's terms text.
@@ -53,7 +77,7 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
   const t = computeTotals(lines, q.extra_charges, { inclusive: false, igst });
   const specs = lines.map(pipeSpec);
   const totalKg = lines.reduce((s, l) => s + (l.weightKg > 0 ? lineWeight(l) : 0), 0);
-  const validTill = validUntil(q.quote_date, termList);
+  const validTill = isInv ? null : validUntil(q.quote_date, termList);
   const placeOfSupply = stateOf(customer?.gstin) ?? stateOf(brand?.gstin);
   const customerState = stateOf(customer?.gstin);
   const company = brand?.tagline?.replace(/^by\s+/i, "").trim() || "";
@@ -125,16 +149,16 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                   </div>
                   <div className="text-right">
                     <h1 className="text-[17pt] font-semibold uppercase leading-none tracking-[0.12em] text-[var(--qd-ink)]">
-                      Quotation
+                      {isInv ? "Tax invoice" : "Quotation"}
                     </h1>
                     <p className="mt-[1.5mm] text-[7.5pt] font-medium uppercase tracking-wider text-[var(--qd-accent)]">
-                      Proforma · not a tax invoice
+                      {isInv ? "Original for recipient" : "Proforma · not a tax invoice"}
                     </p>
                   </div>
                 </header>
 
                 {/* 2. Parties and quotation particulars */}
-                <section className="mt-[3.5mm] grid grid-cols-[1fr_68mm] border border-[var(--qd-line)]">
+                <section className="mt-[3mm] grid grid-cols-[1fr_74mm] border border-[var(--qd-line)]">
                   <div className="p-[3mm]">
                     <Label>Bill to</Label>
                     <p className="mt-[1mm] text-[10pt] font-semibold text-[var(--qd-ink)]">
@@ -154,20 +178,22 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                     )}
                   </div>
                   <dl className="grid grid-cols-[auto_1fr] content-start gap-x-[3mm] gap-y-[1mm] border-l border-[var(--qd-line)] bg-[var(--qd-soft)] p-[3mm] text-[8.5pt]">
-                    <Field k="Quotation no." v={q.quote_no} strong />
-                    <Field k="Date" v={fmtDate(q.quote_date)} />
+                    <Field k={isInv ? "Invoice no." : "Quotation no."} v={q.quote_no} strong />
+                    <Field k={isInv ? "Invoice date" : "Date"} v={fmtDate(q.quote_date)} />
+                    {isInv && invoice.quoteNo && <Field k="Quotation" v={invoice.quoteNo} />}
                     {validTill && <Field k="Valid until" v={fmtDate(validTill)} />}
                     <Field
                       k="Supply"
                       v={igst ? "Inter-state (IGST)" : "Intra-state (CGST + SGST)"}
                     />
                     {placeOfSupply && <Field k="Place of supply" v={placeOfSupply} />}
+                    {isInv && <Field k="Reverse charge" v="No" />}
                     <Field k="Currency" v="Indian Rupee (INR)" />
                   </dl>
                 </section>
 
                 {/* 3. Line items */}
-                <table className="mt-[3.5mm] w-full border-collapse text-[8.5pt]">
+                <table className="mt-[3mm] w-full border-collapse text-[8.5pt]">
                   <thead>
                     <tr className="bg-[var(--qd-accent)] text-left text-[7pt] uppercase tracking-wide text-white">
                       <Th className="w-[7mm] text-center">Sr.</Th>
@@ -220,7 +246,7 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                 </table>
 
                 {/* 4. Tax summary and totals */}
-                <section className="mt-[3.5mm] grid break-inside-avoid grid-cols-[1fr_64mm] gap-[6mm]">
+                <section className="mt-[3mm] grid break-inside-avoid grid-cols-[1fr_64mm] gap-[6mm]">
                   <div>
                     <Label>Tax summary (HSN-wise)</Label>
                     <table className="mt-[1.5mm] w-full border-collapse text-[7.5pt]">
@@ -320,7 +346,7 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                 </section>
 
                 {/* 5. Terms, customer acceptance and signature */}
-                <section className="mt-[3.5mm] grid break-inside-avoid grid-cols-[1fr_44mm_50mm] gap-[6mm] border-t border-[var(--qd-line)] pt-[3mm] text-[8pt]">
+                <section className="mt-[3mm] grid break-inside-avoid grid-cols-[1fr_44mm_50mm] gap-[6mm] border-t border-[var(--qd-line)] pt-[3mm] text-[8pt]">
                   <div>
                     {(termList.length > 0 || q.notes) && (
                       <>
@@ -336,14 +362,18 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                   </div>
                   <div className="flex flex-col justify-between">
                     <div>
-                      <Label>Customer acceptance</Label>
+                      <Label>{isInv ? "Declaration" : "Customer acceptance"}</Label>
                       <p className="mt-[0.5mm] text-[7.5pt] text-[var(--qd-muted)]">
-                        We accept this quotation and its terms.
+                        {isInv
+                          ? "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct."
+                          : "We accept this quotation and its terms."}
                       </p>
                     </div>
-                    <p className="mt-[8mm] border-t border-[var(--qd-text)] pt-[1mm] text-[7.5pt] text-[var(--qd-muted)]">
-                      Signature, stamp &amp; date
-                    </p>
+                    {!isInv && (
+                      <p className="mt-[8mm] border-t border-[var(--qd-text)] pt-[1mm] text-[7.5pt] text-[var(--qd-muted)]">
+                        Signature, stamp &amp; date
+                      </p>
+                    )}
                   </div>
                   <div className="flex flex-col text-center">
                     <p className="font-semibold text-[var(--qd-ink)]">For {signFor}</p>
@@ -360,14 +390,15 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                 </section>
 
                 {/* 7. Notes on the document */}
-                <footer className="mt-[3.5mm] break-inside-avoid border-t border-[var(--qd-line)] pt-[2mm] text-[7pt] leading-snug text-[var(--qd-muted)]">
+                <footer className="mt-[3mm] break-inside-avoid border-t border-[var(--qd-line)] pt-[2mm] text-[7pt] leading-snug text-[var(--qd-muted)]">
                   <p className="flex justify-between gap-[4mm]">
                     <span>
                       Rates per unit, excluding GST.
                       {hasPipes &&
                         " OD = outside diameter, ID = inside diameter, Thickness = minimum wall, SDR = OD ÷ thickness (IS 4984); drawings not to scale."}{" "}
-                      Computer-generated proforma, not a tax invoice; prices subject to confirmation
-                      on order.
+                      {isInv
+                        ? "Computer-generated tax invoice."
+                        : "Computer-generated proforma, not a tax invoice; prices subject to confirmation on order."}
                     </span>
                     <span className="whitespace-nowrap">{q.quote_no}</span>
                   </p>
@@ -414,7 +445,7 @@ const Td = ({
   className?: string;
   colSpan?: number;
 }) => (
-  <td colSpan={colSpan} className={`px-[1.5mm] py-[1.1mm] ${className}`}>
+  <td colSpan={colSpan} className={`px-[1.5mm] py-[0.9mm] ${className}`}>
     {children}
   </td>
 );
