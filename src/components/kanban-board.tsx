@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   CalendarClock,
   Clock,
@@ -65,6 +65,7 @@ export function KanbanBoard({
   rows,
   enquiries,
   followUps,
+  brand,
   onMove,
   onOpenEnquiry,
   onNewEnquiry,
@@ -74,6 +75,7 @@ export function KanbanBoard({
   rows: QRow[];
   enquiries: Enq[];
   followUps: FollowUp[];
+  brand: string; // "all" or a brand name (chosen in the page toolbar)
   onMove: (id: string, s: Stage) => void;
   onOpenEnquiry: (e: Enq) => void;
   onNewEnquiry: () => void;
@@ -83,22 +85,10 @@ export function KanbanBoard({
   const [mobileStage, setMobileStage] = useState<Col>("enquiry");
   const [over, setOver] = useState<Col | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [brand, setBrand] = useState("all");
   const [showAll, setShowAll] = useState<Partial<Record<Col, boolean>>>({});
   const now = Date.now();
   const t = today();
 
-  const brands = useMemo(
-    () =>
-      [
-        ...new Set(
-          [...rows.map((r) => r.brand_name), ...enquiries.map((e) => e.brand)].filter(
-            (b): b is string => !!b,
-          ),
-        ),
-      ].sort(),
-    [rows, enquiries],
-  );
   const rowsB = brand === "all" ? rows : rows.filter((r) => r.brand_name === brand);
   const openEnq = enquiries
     .filter((e) => e.e.status === "open")
@@ -152,7 +142,7 @@ export function KanbanBoard({
     return (
       <span
         aria-hidden
-        className="grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold"
+        className="grid size-6 shrink-0 place-items-center rounded-full text-[10px] font-bold"
         style={{ background: `hsl(${h} 70% 90%)`, color: `hsl(${h} 50% 28%)` }}
       >
         {initialsOf(name)}
@@ -190,7 +180,7 @@ export function KanbanBoard({
         setDragging(null);
         setOver(null);
       }}
-      className={`group relative rounded-xl border border-border bg-card p-3 shadow-sm transition hover:shadow-md ${
+      className={`group relative rounded-lg border border-border bg-card p-2.5 shadow-sm transition hover:shadow-md ${
         mobile ? "" : "cursor-grab active:cursor-grabbing"
       } ${dragging === r.id ? "opacity-40" : ""}`}
     >
@@ -206,8 +196,8 @@ export function KanbanBoard({
             </p>
           </div>
         </div>
-        <p className="mt-2 text-lg font-bold tabular-nums leading-none">{fmtMoney(r.total)}</p>
-        <div className="mt-2 flex items-center justify-between gap-2">
+        <p className="mt-1.5 text-base font-bold tabular-nums leading-none">{fmtMoney(r.total)}</p>
+        <div className="mt-1.5 flex items-center justify-between gap-2">
           {ageBadge(r.updated_at, ["draft", "sent", "negotiation"].includes(r.status))}
           {followBadge(nextFollow((f) => f.a.quote_id === r.id))}
         </div>
@@ -260,7 +250,7 @@ export function KanbanBoard({
         setDragging(null);
         setOver(null);
       }}
-      className={`group relative rounded-xl border border-violet-200 bg-card p-3 shadow-sm transition hover:shadow-md ${
+      className={`group relative rounded-lg border border-violet-200 bg-card p-2.5 shadow-sm transition hover:shadow-md ${
         mobile ? "" : "cursor-grab active:cursor-grabbing"
       } ${dragging === en.e.id ? "opacity-40" : ""}`}
     >
@@ -278,11 +268,11 @@ export function KanbanBoard({
             <p className="truncate text-xs text-muted-foreground">{en.brand ?? "Any brand"}</p>
           </div>
         </div>
-        <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{en.e.title}</p>
-        <p className="mt-1 text-lg font-bold tabular-nums leading-none">
+        <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">{en.e.title}</p>
+        <p className="mt-1 text-base font-bold tabular-nums leading-none">
           {en.e.expected_value ? fmtMoney(en.e.expected_value) : "—"}
         </p>
-        <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="mt-1.5 flex items-center justify-between gap-2">
           {ageBadge(en.e.updated_at, true)}
           {followBadge(nextFollow((f) => f.a.enquiry_id === en.e.id))}
         </div>
@@ -305,7 +295,7 @@ export function KanbanBoard({
       </div>
       <Button
         variant="outline"
-        className="mt-2 h-8 w-full rounded-lg text-xs font-semibold"
+        className="mt-1.5 h-7 w-full rounded-md text-xs font-semibold"
         onClick={() => onConvert(en.e.id)}
       >
         <FilePlus2 className="mr-1 h-3.5 w-3.5" /> Create quote
@@ -334,27 +324,6 @@ export function KanbanBoard({
 
   return (
     <>
-      {/* brand filter */}
-      {brands.length > 1 && (
-        <div className="mb-3 hidden items-center gap-1.5 lg:flex">
-          <span className="mr-1 text-xs font-medium text-muted-foreground">Brand</span>
-          {["all", ...brands].map((b) => (
-            <button
-              key={b}
-              type="button"
-              onClick={() => setBrand(b)}
-              className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
-                brand === b
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {b === "all" ? "All" : b}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* phone */}
       <div className="space-y-3 lg:hidden">
         <Chips<Col>
@@ -403,11 +372,11 @@ export function KanbanBoard({
                 setOver(null);
                 drop(c, e.dataTransfer.getData("text/plain"));
               }}
-              className={`flex min-h-[62vh] flex-col rounded-2xl border border-t-4 border-border bg-secondary/40 transition-colors ${TOP[c]} ${
+              className={`flex min-h-[62vh] flex-col rounded-2xl border border-t-4 lg:min-h-[calc(100vh-8.5rem)] lg:rounded-xl border-border bg-secondary/40 transition-colors ${TOP[c]} ${
                 over === c ? "bg-primary/10 ring-2 ring-primary" : ""
               }`}
             >
-              <header className="px-3 pb-2 pt-3">
+              <header className="px-2.5 pb-1.5 pt-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className={`size-2.5 shrink-0 rounded-full ${DOT[c]}`} />
@@ -426,10 +395,11 @@ export function KanbanBoard({
                     </button>
                   )}
                 </div>
-                <p className="mt-1 text-base font-bold tabular-nums">{fmtMoney(value(c))}</p>
-                <p className="text-[11px] text-muted-foreground">{HINT[c]}</p>
+                <p className="text-sm font-bold tabular-nums" title={HINT[c]}>
+                  {fmtMoney(value(c))}
+                </p>
               </header>
-              <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2">
+              <div className="flex-1 space-y-1.5 overflow-y-auto px-1.5 pb-1.5">
                 {count(c) === 0 && (
                   <p className="rounded-xl border border-dashed border-border/80 px-3 py-6 text-center text-xs text-muted-foreground">
                     {over === c ? "Drop here" : "No deals"}

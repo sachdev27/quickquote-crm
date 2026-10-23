@@ -17,19 +17,19 @@ export function Card({
   return (
     <section
       className={cn(
-        "rounded-2xl border border-border bg-card p-4 shadow-[0_1px_0_rgb(0_0_0/0.02)]",
+        "rounded-2xl border border-border bg-card p-4 shadow-[0_1px_0_rgb(0_0_0/0.02)] lg:rounded-xl lg:p-3",
         className,
       )}
     >
       {(title || aside) && (
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between lg:mb-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {title}
           </h2>
           {aside}
         </div>
       )}
-      <div className="space-y-3">{children}</div>
+      <div className="space-y-3 lg:space-y-2">{children}</div>
     </section>
   );
 }
@@ -44,7 +44,9 @@ export function Field({ label, children }: { label: string; children: React.Reac
 }
 
 export const inputCls =
-  "h-12 w-full rounded-xl border border-input bg-background px-3 text-base tabular-nums outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
+  "h-12 w-full rounded-xl border border-input bg-background px-3 text-base tabular-nums outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 lg:h-9 lg:rounded-lg lg:text-sm";
+// Same as inputCls but 32px tall on desktop (toolbars and filters).
+export const inputSm = inputCls.replace("lg:h-9", "lg:h-8");
 
 export function Chips<T extends string | number>({
   value,
@@ -63,7 +65,7 @@ export function Chips<T extends string | number>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0"
+      className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:gap-1.5 lg:overflow-visible lg:px-0 lg:pb-0"
     >
       {options.map((o) => {
         const on = o.value === value;
@@ -75,8 +77,8 @@ export function Chips<T extends string | number>({
             aria-checked={on}
             onClick={() => onChange(o.value)}
             className={cn(
-              "flex h-12 shrink-0 snap-start touch-manipulation flex-col items-center justify-center rounded-xl border px-4 text-sm font-semibold transition-colors",
-              compact && "lg:h-10 lg:px-3",
+              "flex h-12 shrink-0 snap-start touch-manipulation flex-col items-center justify-center rounded-xl border px-4 text-sm font-semibold transition-colors lg:h-8 lg:flex-row lg:gap-1.5 lg:rounded-lg lg:px-2.5 lg:text-[13px]",
+              compact && "lg:h-8 lg:px-2.5",
               on
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-background text-foreground active:bg-secondary",

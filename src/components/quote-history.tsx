@@ -25,7 +25,7 @@ export function QuoteHistory({ quoteId }: { quoteId: string }) {
           <History className="h-4 w-4" /> No changes recorded yet.
         </p>
       ) : (
-        <ul className="max-h-80 space-y-3 overflow-y-auto pr-1">
+        <ul className="max-h-72 space-y-2 overflow-y-auto pr-1 lg:space-y-1.5">
           {data.map((a) => (
             <li key={a.id} className="border-l-2 border-primary/30 pl-3 text-sm">
               <p className="text-xs text-muted-foreground">

@@ -560,7 +560,7 @@ function ProductsAdmin() {
         </Link>
       }
     >
-      <div className="mx-auto max-w-4xl space-y-4 lg:max-w-none">
+      <div className="mx-auto max-w-4xl space-y-4 lg:max-w-none lg:space-y-2">
         <Chips<Tab>
           label="Section"
           value={tab}
@@ -576,48 +576,48 @@ function ProductsAdmin() {
         />
 
         {tab === "pricing" && pricing.data && (
-          <PricingGrid
-            pricing={scoped!}
-            profileId={profileId}
-            onProfile={setProfileId}
-            onMakeActive={makeActive}
-            onNewProfile={() => setProfileForm({ name: "", copyFrom: profileId })}
-            onEditProfile={(pr) => setProfileForm({ id: pr.id, name: pr.name, copyFrom: "" })}
-            onDeleteProfile={deleteProfileNow}
-            rateRow={gridRow}
-            brands={brands.data ?? []}
-            viewBrand={viewBrand}
-            onViewBrand={setViewBrand}
-            onEdit={editRate}
-            onRenamePreset={(p) => setPresetForm({ id: p.id, name: p.name, copyFrom: "" })}
-            onNewPreset={() => setPresetForm({ name: "", copyFrom: presetId })}
-            onNewGroup={() =>
-              setCard({
-                preset: presetId,
-                group: "",
-                groupName: "",
-                raw: "",
-                rawNonIsi: "",
-                production: "",
-                transport: "",
-                margin: "",
-                pct: true,
-                isNewGroup: true,
-              })
-            }
-            onBulk={() => setBulk(true)}
-            onEditGroup={(g) => setGroupForm({ id: g.id, name: g.name })}
-          />
-        )}
-        {tab === "pricing" && pricing.data && (
-          <BrandRawCard
-            brands={brands.data ?? []}
-            groups={pricing.data.groups}
-            rows={pricing.data.brandRaw.filter((b) => b.profile_id === profileId)}
-            profileId={profileId}
-            profileName={profileName(profileId)}
-            onSaved={() => qc.invalidateQueries({ queryKey: ["pricing"] })}
-          />
+          <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] lg:items-start lg:gap-2 lg:space-y-0">
+            <PricingGrid
+              pricing={scoped!}
+              profileId={profileId}
+              onProfile={setProfileId}
+              onMakeActive={makeActive}
+              onNewProfile={() => setProfileForm({ name: "", copyFrom: profileId })}
+              onEditProfile={(pr) => setProfileForm({ id: pr.id, name: pr.name, copyFrom: "" })}
+              onDeleteProfile={deleteProfileNow}
+              rateRow={gridRow}
+              brands={brands.data ?? []}
+              viewBrand={viewBrand}
+              onViewBrand={setViewBrand}
+              onEdit={editRate}
+              onRenamePreset={(p) => setPresetForm({ id: p.id, name: p.name, copyFrom: "" })}
+              onNewPreset={() => setPresetForm({ name: "", copyFrom: presetId })}
+              onNewGroup={() =>
+                setCard({
+                  preset: presetId,
+                  group: "",
+                  groupName: "",
+                  raw: "",
+                  rawNonIsi: "",
+                  production: "",
+                  transport: "",
+                  margin: "",
+                  pct: true,
+                  isNewGroup: true,
+                })
+              }
+              onBulk={() => setBulk(true)}
+              onEditGroup={(g) => setGroupForm({ id: g.id, name: g.name })}
+            />
+            <BrandRawCard
+              brands={brands.data ?? []}
+              groups={pricing.data.groups}
+              rows={pricing.data.brandRaw.filter((b) => b.profile_id === profileId)}
+              profileId={profileId}
+              profileName={profileName(profileId)}
+              onSaved={() => qc.invalidateQueries({ queryKey: ["pricing"] })}
+            />
+          </div>
         )}
 
         {tab === "weights" && (
@@ -1083,8 +1083,8 @@ function PricingGrid({
   const isActive = profileId === pricing.activeProfileId;
   const current = pricing.profiles.find((p) => p.id === profileId);
   return (
-    <div className="space-y-4">
-      <Card title="Profile · values for a period (e.g. this quarter)">
+    <>
+      <Card title="Profile" className="lg:col-span-2">
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex min-w-0 flex-1 items-center gap-2">
             <select
@@ -1101,13 +1101,18 @@ function PricingGrid({
               ))}
             </select>
             {isActive && (
-              <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+              <span
+                title="Active: new quotes and the price list use these values."
+                className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800 lg:py-0.5"
+              >
                 Active
               </span>
             )}
-            <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-              {pricing.profiles.length} profiles
-            </span>
+            {!isActive && (
+              <span className="hidden shrink-0 text-xs text-amber-700 lg:inline">
+                Not active: edit freely, then Make active. Old quotes keep their values.
+              </span>
+            )}
           </label>
           {current && !isActive && (
             <Button className="h-11 rounded-xl" onClick={() => onMakeActive(current.id)}>
@@ -1138,37 +1143,39 @@ function PricingGrid({
             <Copy className="mr-1 h-4 w-4" /> New profile
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground lg:hidden">
           {isActive
             ? "Active: new quotes and the price list use these values."
             : "Not active: edit freely, then Make active when the new period starts. Old quotes keep their values."}
         </p>
       </Card>
       <Card title={`₹ per kg · grade × preset${current ? ` · ${current.name}` : ""}`}>
-        <p className="-mt-1 text-xs text-muted-foreground">
+        <p className="-mt-1 text-xs text-muted-foreground lg:hidden">
           Raw material + production + transport + profit margin. GST is added on the quote. Tap a
           cell to edit its rate; tap a preset or grade name to rename or delete it.
         </p>
-        <Field label="Show prices for brand (a brand's own raw price replaces the preset raw)">
-          <Chips
-            label="Show prices for brand"
-            value={viewBrand}
-            onChange={onViewBrand}
-            options={[
-              { value: "", label: "Preset raw" },
-              ...brands.map((b) => ({ value: b.id, label: b.name })),
-            ]}
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" className="h-11 rounded-xl" onClick={onBulk}>
-            <SlidersHorizontal className="mr-1 h-4 w-4" /> Bulk update
-          </Button>
-          <Button variant="outline" className="h-11 rounded-xl" onClick={onNewPreset}>
-            <Copy className="mr-1 h-4 w-4" /> New preset
-          </Button>
+        <div className="space-y-2 lg:flex lg:flex-wrap lg:items-end lg:justify-between lg:gap-2 lg:space-y-0">
+          <Field label="Prices for brand (a brand's own raw price replaces the preset raw)">
+            <Chips
+              label="Show prices for brand"
+              value={viewBrand}
+              onChange={onViewBrand}
+              options={[
+                { value: "", label: "Preset raw" },
+                ...brands.map((b) => ({ value: b.id, label: b.name })),
+              ]}
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-2 lg:flex lg:gap-1.5">
+            <Button variant="outline" className="h-11 rounded-xl" onClick={onBulk}>
+              <SlidersHorizontal className="mr-1 h-4 w-4" /> Bulk update
+            </Button>
+            <Button variant="outline" className="h-11 rounded-xl" onClick={onNewPreset}>
+              <Copy className="mr-1 h-4 w-4" /> New preset
+            </Button>
+          </div>
         </div>
-        <div className="-mx-4 overflow-x-auto px-4">
+        <div className="-mx-4 overflow-x-auto px-4 lg:-mx-3 lg:px-3">
           <table className="w-full min-w-[28rem] border-separate border-spacing-0 tabular-nums">
             <thead>
               <tr>
@@ -1191,7 +1198,7 @@ function PricingGrid({
             <tbody>
               {pricing.groups.map((g) => (
                 <tr key={g.id}>
-                  <td className="sticky left-0 border-t border-border/60 bg-card py-2 pr-2">
+                  <td className="sticky left-0 border-t border-border/60 bg-card py-2 pr-2 lg:py-0.5">
                     <button
                       type="button"
                       className="text-left text-sm font-medium underline-offset-4 hover:underline"
@@ -1207,12 +1214,12 @@ function PricingGrid({
                         <button
                           type="button"
                           onClick={() => onEdit(p.id, g)}
-                          className="w-full rounded-lg px-2 py-1.5 text-right active:bg-secondary hover:bg-secondary"
+                          className="w-full rounded-lg px-2 py-1.5 text-right active:bg-secondary hover:bg-secondary lg:py-0.5"
                         >
                           {r ? (
                             <span className="flex items-start justify-end gap-3">
                               <span>
-                                <span className="block text-base font-bold">
+                                <span className="block text-base font-bold lg:text-sm">
                                   {fmtMoney(ratePerKg(r))}
                                 </span>
                                 <span
@@ -1229,7 +1236,7 @@ function PricingGrid({
                                     aria-hidden
                                   />
                                   <span className="text-amber-700">
-                                    <span className="block text-base font-bold">
+                                    <span className="block text-base font-bold lg:text-sm">
                                       {fmtMoney(ratePerKg(r, true))}
                                     </span>
                                     <span className="block text-[10px] font-semibold">
@@ -1259,7 +1266,7 @@ function PricingGrid({
           <Plus className="h-4 w-4" /> Add rate group
         </button>
       </Card>
-    </div>
+    </>
   );
 }
 
@@ -2398,12 +2405,15 @@ function BrandRawCard({
   }
   return (
     <Card title={`Raw material by brand · ₹/kg · ${profileName}`}>
-      <p className="-mt-1 text-xs text-muted-foreground">
+      <span className="hidden text-xs text-muted-foreground lg:block">
+        A brand's raw price replaces the preset raw on its quotes (ISI | Non-ISI).
+      </span>
+      <p className="-mt-1 text-xs text-muted-foreground lg:hidden">
         Raw price depends on the brand. When set, a quote or price list for that brand uses it
         instead of the preset raw; production, transport and margin still come from the preset. ISI
         | Non-ISI.
       </p>
-      <div className="-mx-4 overflow-x-auto px-4">
+      <div className="-mx-4 overflow-x-auto px-4 lg:-mx-3 lg:px-3">
         <table className="w-full min-w-[28rem] tabular-nums">
           <thead>
             <tr className="text-xs text-muted-foreground">
@@ -2418,14 +2428,14 @@ function BrandRawCard({
           <tbody>
             {groups.map((g) => (
               <tr key={g.id} className="border-t border-border/60">
-                <td className="py-2 pr-2 text-sm font-medium">{g.name}</td>
+                <td className="py-2 pr-2 text-sm font-medium lg:py-0.5">{g.name}</td>
                 {brands.map((b) => {
                   const r = row(b.id, g.id);
                   return (
                     <td key={b.id} className="p-1">
                       <button
                         type="button"
-                        className="w-full rounded-lg px-2 py-1.5 text-right hover:bg-secondary"
+                        className="w-full rounded-lg px-2 py-1.5 text-right hover:bg-secondary lg:py-0.5"
                         onClick={() =>
                           setF({
                             brand: b,

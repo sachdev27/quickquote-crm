@@ -17,7 +17,7 @@ export function PipeSection({ spec }: { spec: PipeSpec }) {
   const pm = R - wallPx / 2;
   const px = cx + pm * Math.SQRT1_2;
   const py = cy + pm * Math.SQRT1_2;
-  const LX = 58; // labels start here
+  const LX = 56; // labels start here
   const hasWall = !!spec.wall && !!spec.id;
   const label = `Pipe cross-section: OD ${fmtNum(spec.od)} mm${hasWall ? `, ID ${fmtNum(spec.id!, 1)} mm, thickness ${fmtNum(spec.wall!, 1)} mm` : ""}`;
   const line = "var(--qd-accent, #0b4f7c)";
@@ -25,11 +25,11 @@ export function PipeSection({ spec }: { spec: PipeSpec }) {
   const muted = "var(--qd-muted, #64748b)";
   return (
     <svg
-      viewBox="0 0 138 60"
+      viewBox="0 0 152 60"
       role="img"
       aria-label={label}
-      className="h-[12.5mm] w-[28.7mm] shrink-0"
-      fontSize="10"
+      className="h-[12.5mm] w-[31.7mm] shrink-0"
+      fontSize="9.5"
     >
       {/* bore + wall */}
       <circle cx={cx} cy={cy} r={r} fill="#f1f5f9" />

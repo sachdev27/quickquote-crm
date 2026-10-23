@@ -82,61 +82,64 @@ function QuoteView() {
 
   return (
     <PageShell title={q.quote_no} wide>
-      <div className="mx-auto grid max-w-md gap-4 md:max-w-5xl lg:max-w-none lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
-        <div className="min-w-0 space-y-3">
-          <div className="no-print space-y-3">
-            <div className="flex gap-2">
-              <Button asChild className="h-12 flex-1 rounded-xl text-base font-semibold">
-                <a
-                  href={wa}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={() => q.stage === "draft" && setStatus("sent")}
-                >
-                  <MessageCircle className="mr-2 h-5 w-5" /> Send on WhatsApp
-                </a>
-              </Button>
-              <Button asChild variant="outline" className="h-12 rounded-xl">
-                <Link
-                  to="/new-quote"
-                  search={{ edit: id }}
-                  aria-label="Edit quote"
-                  title="Edit quote"
-                >
-                  <Pencil className="h-5 w-5" />
-                </Link>
-              </Button>
-              <Button
-                variant="outline"
-                className="h-12 rounded-xl"
-                onClick={() => window.print()}
-                aria-label="Print or save PDF"
+      {/* Desktop: actions, activity and history on the left, the document preview on the right. */}
+      <div className="mx-auto grid max-w-md gap-4 md:max-w-5xl lg:max-w-none lg:grid-cols-[23rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-3 lg:gap-y-2">
+        <div className="no-print space-y-3 lg:col-start-1 lg:row-start-1 lg:space-y-2">
+          <div className="flex gap-2 lg:gap-1.5">
+            <Button asChild className="h-12 flex-1 rounded-xl text-base font-semibold lg:text-sm">
+              <a
+                href={wa}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => q.stage === "draft" && setStatus("sent")}
               >
-                <Printer className="h-5 w-5" />
-              </Button>
-              <Button
-                variant="ghost"
-                className="h-12 rounded-xl"
-                onClick={remove}
-                aria-label="Delete quote"
+                <MessageCircle className="mr-2 h-5 w-5 lg:mr-1 lg:h-4 lg:w-4" /> Send on WhatsApp
+              </a>
+            </Button>
+            <Button asChild variant="outline" className="h-12 rounded-xl">
+              <Link
+                to="/new-quote"
+                search={{ edit: id }}
+                aria-label="Edit quote"
+                title="Edit quote"
               >
-                <Trash2 className="h-5 w-5" />
-              </Button>
-            </div>
-            <Chips
-              label="Stage"
-              value={q.stage}
-              onChange={setStatus}
-              options={Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))}
-            />
+                <Pencil className="h-5 w-5 lg:h-4 lg:w-4" />
+                <span className="hidden lg:inline">Edit</span>
+              </Link>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-12 rounded-xl"
+              onClick={() => window.print()}
+              aria-label="Print or save PDF"
+              title="Print or save PDF"
+            >
+              <Printer className="h-5 w-5 lg:h-4 lg:w-4" />
+              <span className="hidden lg:inline">Print</span>
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-12 rounded-xl"
+              onClick={remove}
+              aria-label="Delete quote"
+              title="Delete quote"
+            >
+              <Trash2 className="h-5 w-5 lg:h-4 lg:w-4" />
+            </Button>
           </div>
+          <Chips
+            label="Stage"
+            value={q.stage}
+            onChange={setStatus}
+            options={Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))}
+          />
+        </div>
+        <div className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
           <QuoteDocument data={data} />
         </div>
-        <div className="no-print lg:sticky lg:top-20">
-          <div className="space-y-4">
-            <ActivityPanel target={{ quoteId: id }} phone={customer?.phone ?? null} />
-            <QuoteHistory quoteId={id} />
-          </div>
+        <div className="no-print space-y-4 lg:col-start-1 lg:row-start-2 lg:space-y-3">
+          <ActivityPanel target={{ quoteId: id }} phone={customer?.phone ?? null} />
+          <QuoteHistory quoteId={id} />
         </div>
       </div>
     </PageShell>

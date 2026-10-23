@@ -63,7 +63,7 @@ export function ActivityPanel({
   return (
     <Card title="Activity & follow-ups">
       {phone && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 lg:gap-1.5">
           <Button asChild variant="outline" className="h-10 rounded-lg">
             <a href={`tel:${phone}`} onClick={() => setKind("call")}>
               <Phone className="mr-1 h-4 w-4" /> Call
@@ -117,7 +117,7 @@ export function ActivityPanel({
         </ul>
       )}
 
-      <div className="space-y-2 rounded-xl border border-border p-3">
+      <div className="space-y-2 rounded-xl border border-border p-3 lg:space-y-1.5 lg:rounded-lg lg:p-2">
         <Chips<Kind>
           label="Activity type"
           value={kind}
@@ -132,7 +132,7 @@ export function ActivityPanel({
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="What happened? e.g. Asked for 5% less on 110 mm"
-          className="w-full rounded-xl border border-input bg-background p-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+          className="w-full rounded-xl border border-input bg-background p-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 lg:rounded-lg lg:p-1.5 lg:text-[13px]"
         />
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-muted-foreground">Follow up</span>
@@ -163,7 +163,7 @@ export function ActivityPanel({
         </Button>
       </div>
 
-      <ul className="space-y-2">
+      <ul className="space-y-2 lg:space-y-1.5">
         {history.length === 0 && (
           <li className="text-sm text-muted-foreground">No activity yet.</li>
         )}

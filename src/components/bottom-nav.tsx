@@ -15,8 +15,8 @@ import { useMe } from "@/hooks/use-me";
 
 const LINKS = [
   { to: "/dashboard", label: "Quotes", Icon: LayoutList },
-  { to: "/activities", label: "Activities", Icon: CalendarCheck },
   { to: "/insights", label: "Dashboard", Icon: BarChart3 },
+  { to: "/activities", label: "Activities", Icon: CalendarCheck },
   { to: "/customers", label: "Customers", Icon: Users },
   { to: "/products", label: "Products", Icon: Tag },
   { to: "/settings", label: "Settings", Icon: Settings },
@@ -92,52 +92,43 @@ export function PageShell({
     );
   return (
     <div className="min-h-screen bg-background">
-      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-20 flex-col items-center gap-1 border-r border-border bg-card py-3 lg:flex">
-        <p className="pb-2 text-sm font-bold leading-tight">
+      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-[4.5rem] flex-col items-center gap-0.5 border-r border-border bg-card py-2 lg:flex">
+        <p className="pb-1.5 text-xs font-bold leading-tight">
           Tarko<span className="block text-center text-primary">CRM</span>
         </p>
         <Link
           to="/new-quote"
           title="New quote"
-          className="mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm"
+          className="mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm"
         >
           <Plus className="h-5 w-5" />
         </Link>
-        <button
-          type="button"
-          title="Search (⌘K)"
-          onClick={openSearch}
-          className="mb-1 flex w-16 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-        >
-          <Search className="h-5 w-5" />
-          ⌘K
-        </button>
         {links.map(({ to, label, Icon }) => (
           <Link
             key={to}
             to={to}
             className={cn(
-              "flex w-16 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium",
+              "flex w-14 flex-col items-center gap-0.5 rounded-lg py-1.5 text-[10.5px] font-medium",
               active(to)
                 ? "bg-secondary text-primary"
                 : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
             )}
           >
-            <Icon className="h-5 w-5" />
+            <Icon className="h-[18px] w-[18px]" />
             {label}
           </Link>
         ))}
       </aside>
 
-      <div className="lg:pl-20 print:!pl-0">
+      <div className="lg:pl-[4.5rem] print:!pl-0">
         <header className="no-print sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
           <div
             className={cn(
-              "mx-auto flex w-full max-w-md items-center justify-between gap-4 px-4 py-3 md:max-w-5xl",
-              wide && "lg:max-w-none lg:px-8",
+              "mx-auto flex w-full max-w-md items-center justify-between gap-4 px-4 py-3 md:max-w-5xl lg:py-1.5",
+              wide && "lg:max-w-none lg:px-5",
             )}
           >
-            <h1 className="text-lg font-bold text-foreground">{title}</h1>
+            <h1 className="text-lg font-bold text-foreground lg:text-base">{title}</h1>
             <button
               type="button"
               aria-label="Search"
@@ -168,7 +159,7 @@ export function PageShell({
           className={cn(
             "mx-auto w-full max-w-md px-4 pt-4 md:max-w-5xl md:pb-10",
             bar ? "pb-44" : "pb-28",
-            wide && "lg:max-w-none lg:px-8 lg:pt-6",
+            wide && "lg:max-w-none lg:px-5 lg:pb-6 lg:pt-3",
           )}
         >
           {children}
