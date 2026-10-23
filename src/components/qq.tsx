@@ -51,11 +51,13 @@ export function Chips<T extends string | number>({
   onChange,
   options,
   label,
+  compact,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: string; sub?: string }[];
   label: string;
+  compact?: boolean; // smaller chips in desktop toolbars
 }) {
   return (
     <div
@@ -74,6 +76,7 @@ export function Chips<T extends string | number>({
             onClick={() => onChange(o.value)}
             className={cn(
               "flex h-12 shrink-0 snap-start touch-manipulation flex-col items-center justify-center rounded-xl border px-4 text-sm font-semibold transition-colors",
+              compact && "lg:h-10 lg:px-3",
               on
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-background text-foreground active:bg-secondary",

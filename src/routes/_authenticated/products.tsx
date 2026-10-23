@@ -675,11 +675,7 @@ function ProductsAdmin() {
                   {prod.id && <PresetPreview product={prod} pricing={scoped} />}
                   <div className="flex min-h-0 flex-1 flex-col pt-3">{productForm}</div>
                 </div>
-              ) : (
-                <div className="p-6 text-center text-sm text-muted-foreground">
-                  Click a product to preview its price under every preset and edit it here.
-                </div>
-              )
+              ) : null
             }
             products={prods.data ?? []}
             loading={prods.isLoading}
@@ -2065,10 +2061,10 @@ function ProductList({
 
   return (
     <div className="space-y-4">
-      {/* phone: stacked; desktop: one toolbar row (the table already shows every preset) */}
-      <div className="space-y-4 lg:flex lg:items-center lg:gap-3 lg:space-y-0">
+      {/* phone: stacked; desktop: one compact toolbar row (the table already shows every preset) */}
+      <div className="space-y-4 lg:flex lg:flex-wrap lg:items-center lg:gap-2 lg:space-y-0">
         <Button
-          className="h-12 w-full shrink-0 rounded-xl text-base font-semibold lg:h-11 lg:w-auto lg:px-5 lg:text-sm"
+          className="h-12 w-full shrink-0 rounded-xl text-base font-semibold lg:h-10 lg:w-auto lg:px-4 lg:text-sm"
           onClick={onAdd}
         >
           <Plus className="mr-1 h-5 w-5" /> Add product
@@ -2089,29 +2085,25 @@ function ProductList({
           placeholder="Search size or name"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          className={`${inputCls} lg:h-11 lg:max-w-xs`}
+          className={`${inputCls} lg:h-10 lg:w-56`}
         />
-        <div className="min-w-0 lg:flex-1">
-          <Chips
-            label="Category"
-            value={cat}
-            onChange={setCat}
-            options={[
-              { value: "all" as const, label: "All" },
-              ...(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
-                value: c,
-                label: CATEGORY_LABELS[c],
-              })),
-            ]}
-          />
-        </div>
-        <label className="hidden shrink-0 items-center gap-2 text-sm font-medium lg:flex">
-          Incl. GST <Switch checked={withGst} onCheckedChange={setWithGst} />
-        </label>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
+        <Chips
+          compact
+          label="Category"
+          value={cat}
+          onChange={setCat}
+          options={[
+            { value: "all" as const, label: "All" },
+            ...(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
+              value: c,
+              label: CATEGORY_LABELS[c],
+            })),
+          ]}
+        />
+        <span className="hidden h-6 w-px bg-border lg:block" aria-hidden />
         <div className="hidden lg:block">
           <Chips
+            compact
             label="View"
             value={view}
             onChange={setView}
@@ -2124,6 +2116,7 @@ function ProductList({
         {view === "matrix" && pricing && (
           <div className="hidden lg:block">
             <Chips
+              compact
               label="Matrix preset"
               value={presetId}
               onChange={onPreset}
@@ -2131,16 +2124,26 @@ function ProductList({
             />
           </div>
         )}
-        <div className="ml-auto flex gap-2">
-          <Button variant="outline" className="h-10 rounded-xl" onClick={exportCsv}>
-            <Download className="mr-1 h-4 w-4" /> Export CSV
+        <label className="hidden shrink-0 items-center gap-2 text-sm font-medium lg:flex">
+          Incl. GST <Switch checked={withGst} onCheckedChange={setWithGst} />
+        </label>
+        <div className="flex gap-2 lg:ml-auto">
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={exportCsv}
+            title="Export CSV"
+          >
+            <Download className="h-4 w-4 xl:mr-1" />{" "}
+            <span className="hidden xl:inline">Export</span>
           </Button>
           <Button
             variant="outline"
             className="h-10 rounded-xl"
             onClick={() => fileRef.current?.click()}
+            title="Import CSV"
           >
-            <Upload className="mr-1 h-4 w-4" /> Import CSV
+            <Upload className="h-4 w-4 xl:mr-1" /> <span className="hidden xl:inline">Import</span>
           </Button>
           <input
             ref={fileRef}
@@ -2237,7 +2240,9 @@ function ProductList({
       </div>
 
       {/* desktop: whole catalog in one table, every preset's price side by side */}
-      <div className="hidden gap-4 lg:grid lg:h-[calc(100vh-15rem)] lg:min-h-[28rem] lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]">
+      <div
+        className={`hidden gap-4 lg:grid lg:h-[calc(100vh-12.5rem)] lg:min-h-[28rem] ${pane ? "lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]" : "lg:grid-cols-1"}`}
+      >
         <Card className="min-h-0 overflow-y-auto">
           {view === "matrix" ? (
             <ProductMatrix
@@ -2338,9 +2343,11 @@ function ProductList({
             </>
           )}
         </Card>
-        <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card">
-          {pane}
-        </div>
+        {pane && (
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card">
+            {pane}
+          </div>
+        )}
       </div>
     </div>
   );
