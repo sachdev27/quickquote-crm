@@ -3,6 +3,8 @@ import { computeTotals, inWords, ratePerKg, withBrandRaw } from "@/lib/quote";
 import { pipeKgPerM, sdrFor } from "@/lib/weights";
 import { pipeSpec } from "@/lib/pipe-spec";
 import { stateOf, validUntil } from "@/lib/quote-doc";
+import { parseRoll, withRolls } from "@/lib/rolls";
+import { describeChanges, type AuditSnap } from "@/lib/audit";
 
 describe("rate formula", () => {
   it("₹/kg = (raw + production + transport) × (1 + margin%)", () => {
@@ -87,11 +89,12 @@ describe("pipe spec", () => {
     });
     expect(s).toMatchObject({ od: 110, grade: "PE63", pn: "PN 6", sdr: 13.6 });
     expect(s!.wall).toBeCloseTo(8.1, 1);
+    expect(s!.id).toBeCloseTo(93.8, 1); // 110 − 2 × 8.1
   });
   it("falls back to IS 4984 wall without a weight; OD only for sprinkler pieces", () => {
     expect(
       pipeSpec({ category: "pipe", description: "PE100 63 mm PN 10", unit: "m", weightKg: 0 }),
-    ).toMatchObject({ od: 63, wall: 4.7, sdr: 13.6 });
+    ).toMatchObject({ od: 63, wall: 4.7, id: 53.6, sdr: 13.6 });
     expect(
       pipeSpec({
         category: "sprinkler",
@@ -99,7 +102,7 @@ describe("pipe spec", () => {
         unit: "pc",
         weightKg: 3.2,
       }),
-    ).toMatchObject({ od: 75, wall: null, sdr: null });
+    ).toMatchObject({ od: 75, wall: null, id: null, sdr: null });
     expect(
       pipeSpec({ category: "fitting", description: "Elbow 63 mm", unit: "pc", weightKg: 0 }),
     ).toBeNull();
@@ -119,5 +122,66 @@ describe("quotation particulars", () => {
       ]),
     ).toBe("2026-11-04");
     expect(validUntil("2026-10-28", ["Price ex-factory."])).toBeNull();
+  });
+});
+
+describe("roll layout in descriptions", () => {
+  it("rewrites the roll suffix when quantity or roll length changes", () => {
+    expect(withRolls('HDPE Pipe PE63 63 mm (2") PN 6 · 1 roll × 200 m', 900, 300)).toBe(
+      'HDPE Pipe PE63 63 mm (2") PN 6 · 3 rolls × 300 m',
+    );
+    expect(withRolls("Pipe · 3 rolls × 300 m", 650, 300)).toBe("Pipe"); // part roll: metres only
+    expect(withRolls("Pipe", 500, 0)).toBe("Pipe");
+    expect(parseRoll("Pipe · 2 rolls × 450 m")).toEqual({ rolls: 2, len: 450 });
+  });
+});
+
+describe("audit summary", () => {
+  const line = {
+    description: "HDPE Pipe PE63 63 mm PN 6 · 3 rolls × 300 m",
+    unit: "m" as const,
+    qty: 900,
+    weightKg: 0.818,
+    rateKg: 100,
+    unitPrice: 81.8,
+    gstRate: 18,
+  };
+  const snap = (over: Partial<AuditSnap> = {}): AuditSnap => ({
+    customer: "Shree Ganesh",
+    brand: "Tarko",
+    igst: false,
+    nonIsi: false,
+    extra: 0,
+    notes: null,
+    terms: "Price ex-factory.",
+    lines: [line],
+    ...over,
+  });
+  it("is empty when nothing changed", () => {
+    expect(describeChanges(snap(), snap())).toBe("");
+  });
+  it("lists only what changed, old → new", () => {
+    const after = snap({
+      extra: 2500,
+      lines: [
+        {
+          ...line,
+          qty: 1000,
+          gstRate: 12,
+          description: "HDPE Pipe PE63 63 mm PN 6 · 2 rolls × 500 m",
+        },
+      ],
+    });
+    const s = describeChanges(snap(), after);
+    expect(s).toContain("qty 900 → 1,000 m");
+    expect(s).toContain("rolls 3×300 m → 2×500 m");
+    expect(s).toContain("GST 18 → 12%");
+    expect(s).toContain("Freight ₹0 → ₹2,500");
+    expect(s).toMatch(/Total ₹[\d,.]+ → ₹[\d,.]+$/);
+    expect(s.length).toBeLessThan(400);
+  });
+  it("notes added and removed items", () => {
+    expect(describeChanges(snap(), snap({ lines: [line, line] }))).toContain("Added");
+    expect(describeChanges(snap({ lines: [line, line] }), snap())).toContain("Removed");
   });
 });

@@ -197,3 +197,14 @@ export const contacts = sqliteTable("contacts", {
   is_primary: integer("is_primary").notNull().default(0),
   created_at: now(),
 });
+
+// Change history: one short row per save (what changed, when, by whom). No snapshots.
+export const quote_audit = sqliteTable("quote_audit", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  quote_id: text("quote_id").notNull(),
+  at: text("at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  by: text("by"),
+  what: text("what").notNull(),
+});

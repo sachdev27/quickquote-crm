@@ -56,7 +56,8 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
   const validTill = validUntil(q.quote_date, termList);
   const placeOfSupply = stateOf(customer?.gstin) ?? stateOf(brand?.gstin);
   const customerState = stateOf(customer?.gstin);
-  const signFor = brand?.tagline?.replace(/^by\s+/i, "") || brand?.name;
+  const company = brand?.tagline?.replace(/^by\s+/i, "").trim() || "";
+  const signFor = company || brand?.name;
   const hasPipes = specs.some(Boolean);
 
   return (
@@ -83,12 +84,19 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                     )}
                     <div>
                       {brand?.logo ? (
-                        // The uploaded logo replaces the name + tagline.
-                        <img
-                          src={brand.logo}
-                          alt={brand.name}
-                          className="max-h-[16mm] max-w-[70mm] object-contain object-left"
-                        />
+                        // The uploaded logo replaces the brand name + tagline; the company name goes under it.
+                        <>
+                          <img
+                            src={brand.logo}
+                            alt={brand.name}
+                            className="max-h-[16mm] max-w-[70mm] object-contain object-left"
+                          />
+                          {company && (
+                            <p className="mt-[1mm] text-[10pt] font-semibold leading-tight text-[var(--qd-ink)]">
+                              {company}
+                            </p>
+                          )}
+                        </>
                       ) : (
                         <>
                           <p className="text-[15pt] font-bold leading-tight text-[var(--qd-ink)]">
@@ -164,10 +172,10 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                     <tr className="bg-[var(--qd-accent)] text-left text-[7pt] uppercase tracking-wide text-white">
                       <Th className="w-[7mm] text-center">Sr.</Th>
                       <Th>Description of goods</Th>
-                      <Th className="w-[17mm]">HSN</Th>
+                      <Th className="w-[16mm]">HSN</Th>
                       <Th className="w-[17mm] text-right">Qty</Th>
-                      <Th className="w-[19mm] text-right">Rate (₹)</Th>
-                      <Th className="w-[11mm] text-right">GST</Th>
+                      <Th className="w-[17mm] text-right">Rate (₹)</Th>
+                      <Th className="w-[10mm] text-right">GST</Th>
                       <Th className="w-[25mm] text-right">Amount (₹)</Th>
                     </tr>
                   </thead>
@@ -180,7 +188,7 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                         <Td className="text-center text-[var(--qd-muted)]">{i + 1}</Td>
                         <Td>
                           <div className="flex items-center gap-[2.5mm]">
-                            {specs[i] && <PipeSection spec={specs[i]!} size={32} />}
+                            {specs[i] && <PipeSection spec={specs[i]!} />}
                             <div className="min-w-0">
                               <p className="font-medium text-[var(--qd-ink)]">{l.description}</p>
                               <SpecLine spec={specs[i]} line={l} />
@@ -208,19 +216,6 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                         </Td>
                       </tr>
                     )}
-
-                    <tr className="text-[8pt]">
-                      <td colSpan={2} className="px-[1.5mm] py-[1.5mm] text-[var(--qd-muted)]">
-                        {lines.length} {lines.length === 1 ? "item" : "items"}
-                        {totalKg > 0 && ` · total weight ${fmtNum(totalKg)} kg`}
-                      </td>
-                      <td colSpan={4} className="py-[1.5mm] text-right font-medium">
-                        Taxable value
-                      </td>
-                      <td className="px-[1.5mm] py-[1.5mm] text-right font-semibold text-[var(--qd-ink)]">
-                        {fmtAmt(t.taxable)}
-                      </td>
-                    </tr>
                   </tbody>
                 </table>
 
@@ -281,6 +276,10 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                       <Label>Amount in words</Label>
                       <p className="mt-[0.5mm] text-[8.5pt] font-medium text-[var(--qd-ink)]">
                         Indian Rupees {inWords(t.total).replace(/ Rupees Only$/, "")} Only
+                      </p>
+                      <p className="mt-[1.5mm] text-[7.5pt] text-[var(--qd-muted)]">
+                        {lines.length} {lines.length === 1 ? "item" : "items"}
+                        {totalKg > 0 && ` · total weight ${fmtNum(totalKg)} kg`}
                       </p>
                     </div>
                   </div>
@@ -346,9 +345,15 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                       Signature, stamp &amp; date
                     </p>
                   </div>
-                  <div className="flex flex-col justify-between text-center">
+                  <div className="flex flex-col text-center">
                     <p className="font-semibold text-[var(--qd-ink)]">For {signFor}</p>
-                    <p className="mt-[8mm] border-t border-[var(--qd-text)] pt-[1mm] text-[7.5pt] text-[var(--qd-muted)]">
+                    {/* company stamp with signature (transparent PNG, sits on the signing line) */}
+                    <img
+                      src="/sakhi-stamp.png"
+                      alt="Company stamp and signature"
+                      className="mx-auto mt-[0.5mm] -mb-[0.5mm] h-[16mm] w-auto object-contain"
+                    />
+                    <p className="border-t border-[var(--qd-text)] pt-[1mm] text-[7.5pt] text-[var(--qd-muted)]">
                       Authorised signatory
                     </p>
                   </div>
@@ -360,7 +365,7 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                     <span>
                       Rates per unit, excluding GST.
                       {hasPipes &&
-                        " OD = outside diameter, Wall = minimum wall thickness, SDR = OD ÷ wall (IS 4984); drawings not to scale."}{" "}
+                        " OD = outside diameter, ID = inside diameter, Thickness = minimum wall, SDR = OD ÷ thickness (IS 4984); drawings not to scale."}{" "}
                       Computer-generated proforma, not a tax invoice; prices subject to confirmation
                       on order.
                     </span>
@@ -381,24 +386,16 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
   );
 }
 
-// One quiet line under the description: pipe dimensions, then weight and ₹/kg basis.
+// Quiet lines under the description. OD / ID / thickness are written on the drawing itself.
 function SpecLine({ spec, line: l }: { spec: PipeSpec | null | undefined; line: Line }) {
-  const dims = spec
-    ? [
-        `OD ${fmtNum(spec.od)} mm`,
-        spec.wall && `Wall ${fmtNum(spec.wall, 1)} mm`,
-        spec.sdr && `SDR ${fmtNum(spec.sdr, 1)}`,
-      ].filter(Boolean)
-    : [];
   const weight =
     l.weightKg > 0 &&
     `${fmtNum(l.weightKg, 3)} kg/${UNIT_LABELS[l.unit]} · ${fmtNum(lineWeight(l))} kg @ ₹${fmtAmt(l.rateKg)}/kg`;
-  if (!dims.length && !weight) return null;
+  const sdr = spec?.sdr ? `SDR ${fmtNum(spec.sdr, 1)}` : "";
+  if (!sdr && !weight) return null;
   return (
     <>
-      {dims.length > 0 && (
-        <p className="text-[7.5pt] text-[var(--qd-accent)]">{dims.join(" · ")}</p>
-      )}
+      {sdr && <p className="text-[7.5pt] text-[var(--qd-accent)]">{sdr}</p>}
       {weight && <p className="text-[7.5pt] text-[var(--qd-muted)]">{weight}</p>}
     </>
   );
@@ -417,7 +414,7 @@ const Td = ({
   className?: string;
   colSpan?: number;
 }) => (
-  <td colSpan={colSpan} className={`px-[1.5mm] py-[1.3mm] ${className}`}>
+  <td colSpan={colSpan} className={`px-[1.5mm] py-[1.1mm] ${className}`}>
     {children}
   </td>
 );

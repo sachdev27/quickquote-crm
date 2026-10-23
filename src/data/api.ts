@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { LOGO_MAX_CHARS, LOGO_RE } from "@/lib/logo";
 import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { computeTotals, nextQuoteNo, type Line } from "@/lib/quote";
+import { computeTotals, fmtMoney, nextQuoteNo, type Line } from "@/lib/quote";
+import { describeChanges, type AuditSnap } from "@/lib/audit";
 import { adminOnly, authed } from "./auth.server";
 import { getDb } from "./env.server";
 import {
@@ -21,6 +22,7 @@ import {
   users,
   enquiries,
   contacts,
+  quote_audit,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -606,40 +608,40 @@ export const getQuote = createServerFn({ method: "GET" })
     };
   });
 
+const quoteBody = z.object({
+  brandId: z.string(),
+  customerId: z.string().nullable(),
+  presetId: z.string().nullable(),
+  profileId: z.string().nullable(),
+  nonIsi: z.boolean().default(false),
+  terms: z.array(text.min(1)).max(30).default([]),
+  newCustomer: z.object({ name: text.min(1), phone: opt, gstin: opt }).nullable(),
+  enquiryId: z.string().nullable().default(null),
+  igst: z.boolean(),
+  extra: money,
+  notes: opt,
+  lines: z
+    .array(
+      z.object({
+        productId: z.string().nullable(),
+        category,
+        description: text.min(1),
+        hsn: opt,
+        unit,
+        qty: z.number().positive().max(1e7),
+        weightKg: z.number().finite().min(0).max(10000),
+        rateKg: money,
+        unitPrice: money,
+        gstRate: gst,
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+
 export const createQuote = createServerFn({ method: "POST" })
   .middleware([authed])
-  .validator(
-    z.object({
-      brandId: z.string(),
-      customerId: z.string().nullable(),
-      presetId: z.string().nullable(),
-      profileId: z.string().nullable(),
-      nonIsi: z.boolean().default(false),
-      terms: z.array(text.min(1)).max(30).default([]),
-      newCustomer: z.object({ name: text.min(1), phone: opt, gstin: opt }).nullable(),
-      enquiryId: z.string().nullable().default(null),
-      igst: z.boolean(),
-      extra: money,
-      notes: opt,
-      lines: z
-        .array(
-          z.object({
-            productId: z.string().nullable(),
-            category,
-            description: text.min(1),
-            hsn: opt,
-            unit,
-            qty: z.number().positive().max(1e7),
-            weightKg: z.number().finite().min(0).max(10000),
-            rateKg: money,
-            unitPrice: money,
-            gstRate: gst,
-          }),
-        )
-        .min(1)
-        .max(100),
-    }),
-  )
+  .validator(quoteBody)
   .handler(async ({ data, context }) => {
     const db = await getDb();
     const [brand] = await db.select().from(brands).where(eq(brands.id, data.brandId));
@@ -679,6 +681,17 @@ export const createQuote = createServerFn({ method: "POST" })
             notes: data.notes ?? null,
             created_by: context.user,
           }),
+          db.insert(quote_audit).values({
+            quote_id: quoteId,
+            by: context.user,
+            what: `Created · ${data.lines.length} item${data.lines.length > 1 ? "s" : ""} · ${fmtMoney(
+              computeTotals(
+                data.lines.map((l) => ({ ...l, hsn: l.hsn ?? null })),
+                data.extra,
+                { inclusive: false, igst: data.igst },
+              ).total,
+            )}`,
+          }),
           ...data.lines.map((l, position) =>
             db.insert(quote_items).values({
               quote_id: quoteId,
@@ -717,6 +730,123 @@ export const createQuote = createServerFn({ method: "POST" })
     throw new Error("unreachable");
   });
 
+// Edit a saved quote: replaces header fields and lines, and logs one short audit row of what changed.
+export const updateQuote = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(quoteBody.omit({ enquiryId: true }).extend({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    const [old] = await db.select().from(quotes).where(eq(quotes.id, data.id));
+    if (!old) throw new Error("Quote not found");
+    const [brand] = await db.select().from(brands).where(eq(brands.id, data.brandId));
+    if (!brand) throw new Error("Brand not found");
+    const oldItems = await db
+      .select()
+      .from(quote_items)
+      .where(eq(quote_items.quote_id, old.id))
+      .orderBy(quote_items.position);
+
+    let customerId = data.customerId;
+    if (!customerId && data.newCustomer) {
+      const [c] = await db
+        .insert(customers)
+        .values(data.newCustomer)
+        .returning({ id: customers.id });
+      if (!c) throw new Error("Could not create customer");
+      customerId = c.id;
+    }
+    const nameOf = async (id: string | null) =>
+      id
+        ? ((await db.select({ n: customers.name }).from(customers).where(eq(customers.id, id)))[0]
+            ?.n ?? null)
+        : null;
+    const [oldBrand] = await db
+      .select({ n: brands.name })
+      .from(brands)
+      .where(eq(brands.id, old.brand_id));
+    const terms = data.terms.length ? data.terms.join("\n") : null;
+    const lineOf = (l: Line) => ({
+      description: l.description,
+      unit: l.unit,
+      qty: l.qty,
+      weightKg: l.weightKg,
+      rateKg: l.rateKg,
+      unitPrice: l.unitPrice,
+      gstRate: l.gstRate,
+    });
+    const before: AuditSnap = {
+      customer: await nameOf(old.customer_id),
+      brand: oldBrand?.n ?? null,
+      igst: !!old.igst,
+      nonIsi: !!old.non_isi,
+      extra: old.extra_charges,
+      notes: old.notes,
+      terms: old.terms,
+      lines: oldItems.map((i) => lineOf(toLine(i))),
+    };
+    const after: AuditSnap = {
+      customer: await nameOf(customerId),
+      brand: brand.name,
+      igst: data.igst,
+      nonIsi: data.nonIsi,
+      extra: data.extra,
+      notes: data.notes ?? null,
+      terms,
+      lines: data.lines.map((l) => lineOf(l as Line)),
+    };
+    const what = describeChanges(before, after);
+    if (!what) return { ok: true, changed: false };
+
+    await db.batch([
+      db
+        .update(quotes)
+        .set({
+          brand_id: brand.id,
+          customer_id: customerId,
+          preset_id: data.presetId,
+          profile_id: data.profileId,
+          non_isi: data.nonIsi ? 1 : 0,
+          terms,
+          igst: data.igst ? 1 : 0,
+          extra_charges: data.extra,
+          notes: data.notes ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .where(eq(quotes.id, old.id)),
+      db.delete(quote_items).where(eq(quote_items.quote_id, old.id)),
+      ...data.lines.map((l, position) =>
+        db.insert(quote_items).values({
+          quote_id: old.id,
+          position,
+          product_id: l.productId,
+          category: l.category,
+          description: l.description,
+          hsn: l.hsn ?? null,
+          unit: l.unit,
+          qty: l.qty,
+          weight_kg: l.weightKg,
+          rate_kg: l.rateKg,
+          unit_price: l.unitPrice,
+          gst_rate: l.gstRate,
+        }),
+      ),
+      db.insert(quote_audit).values({ quote_id: old.id, by: context.user, what }),
+    ]);
+    return { ok: true, changed: true };
+  });
+
+export const listAudit = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .validator(z.object({ quoteId: z.string() }))
+  .handler(async ({ data }) =>
+    (await getDb())
+      .select()
+      .from(quote_audit)
+      .where(eq(quote_audit.quote_id, data.quoteId))
+      .orderBy(desc(quote_audit.at), desc(quote_audit.id))
+      .limit(200),
+  );
+
 export const setQuoteStatus = createServerFn({ method: "POST" })
   .middleware([authed])
   .validator(
@@ -731,6 +861,11 @@ export const setQuoteStatus = createServerFn({ method: "POST" })
     if (!q) throw new Error("Quote not found");
     if (q.stage === data.status) return { ok: true };
     await db.batch([
+      db.insert(quote_audit).values({
+        quote_id: data.id,
+        by: context.user,
+        what: `Stage ${q.stage} → ${data.status}`,
+      }),
       db
         .update(quotes)
         .set({
@@ -855,6 +990,7 @@ export const deleteQuote = createServerFn({ method: "POST" })
     const db = await getDb();
     await db.batch([
       db.delete(quote_items).where(eq(quote_items.quote_id, data.id)),
+      db.delete(quote_audit).where(eq(quote_audit.quote_id, data.id)),
       db.delete(quotes).where(eq(quotes.id, data.id)),
     ]);
     return { ok: true };

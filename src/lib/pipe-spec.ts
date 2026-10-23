@@ -4,6 +4,7 @@ import { PE_DENSITY, pnNumber, sdrFor, wallFor } from "./weights";
 export interface PipeSpec {
   od: number; // outside diameter, mm
   wall: number | null; // wall thickness, mm
+  id: number | null; // inside diameter = OD − 2 × wall, mm
   sdr: number | null;
   grade: string | null; // PE63 / PE80 / PE100
   pn: string | null; // "PN 6"
@@ -35,6 +36,7 @@ export function pipeSpec(
   return {
     od,
     wall,
+    id: wall ? Math.round((od - 2 * wall) * 10) / 10 : null,
     sdr: isiSdr ?? (wall ? Math.round((od / wall) * 10) / 10 : null),
     grade: grade ? `PE${grade}` : null,
     pn,

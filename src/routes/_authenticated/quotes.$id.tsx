@@ -1,13 +1,14 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Check, MessageCircle, Phone, Printer, Trash2 } from "lucide-react";
+import { CalendarClock, Check, MessageCircle, Pencil, Phone, Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, inputCls } from "@/components/qq";
 import { Button } from "@/components/ui/button";
 import { QuoteDocument } from "@/components/quote-document";
 import { ActivityPanel } from "@/components/activity-panel";
+import { QuoteHistory } from "@/components/quote-history";
 import {
   addActivity,
   deleteQuote,
@@ -95,6 +96,16 @@ function QuoteView() {
                   <MessageCircle className="mr-2 h-5 w-5" /> Send on WhatsApp
                 </a>
               </Button>
+              <Button asChild variant="outline" className="h-12 rounded-xl">
+                <Link
+                  to="/new-quote"
+                  search={{ edit: id }}
+                  aria-label="Edit quote"
+                  title="Edit quote"
+                >
+                  <Pencil className="h-5 w-5" />
+                </Link>
+              </Button>
               <Button
                 variant="outline"
                 className="h-12 rounded-xl"
@@ -122,7 +133,10 @@ function QuoteView() {
           <QuoteDocument data={data} />
         </div>
         <div className="no-print lg:sticky lg:top-20">
-          <ActivityPanel target={{ quoteId: id }} phone={customer?.phone ?? null} />
+          <div className="space-y-4">
+            <ActivityPanel target={{ quoteId: id }} phone={customer?.phone ?? null} />
+            <QuoteHistory quoteId={id} />
+          </div>
         </div>
       </div>
     </PageShell>
