@@ -8,6 +8,7 @@ import { Card, Chips, Field, Stepper, inputCls } from "@/components/qq";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
 import { Switch } from "@/components/ui/switch";
+import { FittingForm } from "@/components/fitting-form";
 import {
   createQuote,
   getQuote,
@@ -731,6 +732,7 @@ function NewQuote() {
               products={prods.data ?? []}
               rateOf={rateOf}
               onPick={addFromCatalog}
+              onAddLine={(l) => addLine(l)}
               onMore={() => setSheet(true)}
               inQuote={new Set(lines.map((l) => l.productId ?? ""))}
             />
@@ -1312,12 +1314,14 @@ function CatalogPanel({
   products,
   rateOf,
   onPick,
+  onAddLine,
   onMore,
   inQuote,
 }: {
   products: Product[];
   rateOf: (id: string | null) => number;
   onPick: (p: Product) => void;
+  onAddLine: (l: Line) => void;
   onMore: () => void;
   inQuote: Set<string>;
 }) {
@@ -1414,6 +1418,8 @@ function CatalogPanel({
             {r === "cut" ? "100 m for cut roll" : "first roll length"}).
           </p>
         </>
+      ) : cat === "fitting" ? (
+        <FittingForm onAdd={onAddLine} />
       ) : (
         <ul className="-my-1 divide-y divide-border/60">
           {others.length === 0 && (
@@ -1910,7 +1916,9 @@ function AddItemSheet({
           </>
         )}
 
-        {(cat === "sprinkler" || cat === "fitting") && (
+        {cat === "fitting" && <FittingForm onAdd={onAdd} />}
+
+        {cat === "sprinkler" && (
           <>
             {!listItems.length && (
               <p className="text-sm text-muted-foreground">
@@ -2069,7 +2077,7 @@ function AddItemSheet({
             : "flex items-center gap-3 border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
         }
       >
-        <div className="min-w-0 flex-1">
+        <div className={cat === "fitting" ? "min-w-0 flex-1 invisible" : "min-w-0 flex-1"}>
           <p className="truncate text-xs text-muted-foreground tabular-nums">
             {fmtNum(qty)} {UNIT_LABELS[unit]} × {fmtMoney(unitPrice)}/{UNIT_LABELS[unit]}
           </p>
@@ -2081,9 +2089,11 @@ function AddItemSheet({
         <Button variant="outline" className="h-12 rounded-xl" onClick={() => onOpenChange(false)}>
           Done
         </Button>
-        <Button className="h-12 rounded-xl px-6 font-semibold" onClick={add}>
-          Add
-        </Button>
+        {cat !== "fitting" && (
+          <Button className="h-12 rounded-xl px-6 font-semibold" onClick={add}>
+            Add
+          </Button>
+        )}
       </div>
     </>
   );
