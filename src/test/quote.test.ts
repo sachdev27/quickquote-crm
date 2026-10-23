@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeTotals, inWords, ratePerKg, withBrandRaw } from "@/lib/quote";
 import { pipeKgPerM, sdrFor } from "@/lib/weights";
 import { pipeSpec } from "@/lib/pipe-spec";
+import { stateOf, validUntil } from "@/lib/quote-doc";
 
 describe("rate formula", () => {
   it("₹/kg = (raw + production + transport) × (1 + margin%)", () => {
@@ -102,5 +103,21 @@ describe("pipe spec", () => {
     expect(
       pipeSpec({ category: "fitting", description: "Elbow 63 mm", unit: "pc", weightKg: 0 }),
     ).toBeNull();
+  });
+});
+
+describe("quotation particulars", () => {
+  it("names the state from a GSTIN", () => {
+    expect(stateOf("27ABCDE1234F1Z5")).toBe("Maharashtra (27)");
+    expect(stateOf(null)).toBeNull();
+  });
+  it("reads validity days from the terms", () => {
+    expect(
+      validUntil("2026-10-28", [
+        "Price ex-factory.",
+        "Prices valid for 7 days from quotation date.",
+      ]),
+    ).toBe("2026-11-04");
+    expect(validUntil("2026-10-28", ["Price ex-factory."])).toBeNull();
   });
 });
