@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeTotals, inWords, ratePerKg, withBrandRaw } from "@/lib/quote";
 import { pipeKgPerM, sdrFor } from "@/lib/weights";
+import { pipeSpec } from "@/lib/pipe-spec";
 
 describe("rate formula", () => {
   it("₹/kg = (raw + production + transport) × (1 + margin%)", () => {
@@ -72,5 +73,34 @@ describe("totals", () => {
       "Three Lakh Sixty Seven Thousand Four Hundred Sixty Two Rupees Only",
     );
     expect(inWords(12500000)).toBe("One Crore Twenty Five Lakh Rupees Only");
+  });
+});
+
+describe("pipe spec", () => {
+  it("reads OD, grade, PN and the wall behind the quoted weight", () => {
+    const s = pipeSpec({
+      category: "pipe",
+      description: 'HDPE Pipe PE63 110 mm (4") PN 6',
+      unit: "m",
+      weightKg: pipeKgPerM(110, 13.6),
+    });
+    expect(s).toMatchObject({ od: 110, grade: "PE63", pn: "PN 6", sdr: 13.6 });
+    expect(s!.wall).toBeCloseTo(8.1, 1);
+  });
+  it("falls back to IS 4984 wall without a weight; OD only for sprinkler pieces", () => {
+    expect(
+      pipeSpec({ category: "pipe", description: "PE100 63 mm PN 10", unit: "m", weightKg: 0 }),
+    ).toMatchObject({ od: 63, wall: 4.7, sdr: 13.6 });
+    expect(
+      pipeSpec({
+        category: "sprinkler",
+        description: "Sprinkler Pipe 75 mm × 3.2 kg",
+        unit: "pc",
+        weightKg: 3.2,
+      }),
+    ).toMatchObject({ od: 75, wall: null, sdr: null });
+    expect(
+      pipeSpec({ category: "fitting", description: "Elbow 63 mm", unit: "pc", weightKg: 0 }),
+    ).toBeNull();
   });
 });

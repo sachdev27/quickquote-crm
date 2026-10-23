@@ -1,9 +1,33 @@
+import type { ReactNode } from "react";
 import { UNIT_LABELS, computeTotals, fmtMoney, fmtNum, inWords, lineWeight } from "@/lib/quote";
+import { pipeSpec, type PipeSpec } from "@/lib/pipe-spec";
+import { PipeSection } from "@/components/pipe-section";
 import type { getQuote } from "@/data/api";
 
 type QuoteData = Awaited<ReturnType<typeof getQuote>>;
 
-// The printable proforma (letterhead, lines, HSN-wise GST, totals). Shared by the quote page and the desktop preview.
+// "2026-10-23" -> "23 Oct 2026"; anything else prints as stored.
+const fmtDate = (s: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return s;
+  return new Date(Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!)).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+};
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join("");
+
+// The printable proforma: letterhead, items with pipe cross-sections, HSN-wise GST, totals.
+// Always paper-white (also in dark mode), like a PDF. Shared by the quote page and the desktop preview.
 export function QuoteDocument({ data }: { data: QuoteData }) {
   const { quote: q, brand, customer, lines } = data;
   const igst = !!q.igst;
@@ -13,228 +37,336 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
     .map((x) => x.trim())
     .filter(Boolean);
   const t = computeTotals(lines, q.extra_charges, { inclusive: false, igst });
+  const specs = lines.map(pipeSpec);
+  const totalKg = lines.reduce((s, l) => s + (l.weightKg > 0 ? lineWeight(l) : 0), 0);
+  const signFor = brand?.tagline?.replace(/^by\s+/i, "") || brand?.name;
+
   return (
-    <article className="@container print-sheet rounded-2xl border border-border bg-card p-5 text-sm @2xl:p-8">
-      {/* Letterhead */}
-      <header className="flex flex-col gap-3 border-b border-border pb-4 @md:flex-row @md:justify-between">
-        <div>
-          <p className="text-2xl font-bold leading-tight">{brand?.name}</p>
-          {brand?.tagline && <p className="text-muted-foreground">{brand.tagline}</p>}
-          {brand?.address && (
-            <p className="mt-1 whitespace-pre-line text-muted-foreground">{brand.address}</p>
-          )}
-          {brand?.phone && <p className="text-muted-foreground">{brand.phone}</p>}
-          <p className="text-muted-foreground">
-            {[brand?.gstin && `GSTIN ${brand.gstin}`, brand?.pan && `PAN ${brand.pan}`]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        </div>
-        <div className="@md:text-right">
-          <p className="text-xs font-bold uppercase tracking-widest text-primary">
-            Proforma Quotation
-          </p>
-          <p className="font-semibold">{q.quote_no}</p>
-          <p className="text-muted-foreground">{q.quote_date}</p>
-        </div>
-      </header>
-
-      <section className="border-b border-border py-4">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Billed to</p>
-        <p className="font-semibold">{customer?.name ?? "—"}</p>
-        {customer?.address && (
-          <p className="whitespace-pre-line text-muted-foreground">{customer.address}</p>
-        )}
-        {customer?.phone && <p className="text-muted-foreground">{customer.phone}</p>}
-        {customer?.gstin && <p className="text-muted-foreground">GSTIN {customer.gstin}</p>}
-      </section>
-
-      {/* Items: stacked on phones, table on desktop/print */}
-      <ul className="divide-y divide-border/60 tabular-nums @2xl:hidden print:hidden">
-        {lines.map((l, i) => (
-          <li key={i} className="py-3">
-            <p className="font-medium leading-snug">
-              {i + 1}. {l.description}
+    <article className="quote-doc @container print-sheet overflow-hidden rounded-xl bg-white text-[13px] leading-normal text-slate-800 shadow-sm ring-1 ring-slate-200">
+      <div className="h-1.5 bg-[var(--qd-accent)] print:mb-6" />
+      <div className="p-5 @2xl:p-10 print:p-0">
+        {/* Letterhead */}
+        <header className="flex flex-col gap-6 @2xl:flex-row @2xl:items-start @2xl:justify-between">
+          <div className="flex gap-3.5">
+            {brand?.name && (
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-[var(--qd-accent)] font-display text-lg font-bold text-white">
+                {initials(brand.name)}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="font-display text-xl font-bold leading-tight text-slate-900">
+                {brand?.name}
+              </p>
+              {brand?.tagline && <p className="text-slate-500">{brand.tagline}</p>}
+              <div className="mt-2 space-y-0.5 text-xs text-slate-500">
+                {brand?.address && <p className="whitespace-pre-line">{brand.address}</p>}
+                {brand?.phone && <p>{brand.phone}</p>}
+                {(brand?.gstin || brand?.pan) && (
+                  <p className="font-medium text-slate-600">
+                    {[brand.gstin && `GSTIN ${brand.gstin}`, brand.pan && `PAN ${brand.pan}`]
+                      .filter(Boolean)
+                      .join("  ·  ")}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="@2xl:text-right">
+            <p className="font-display text-3xl font-light uppercase tracking-[0.18em] text-slate-900">
+              Quotation
             </p>
-            <p className="mt-1 flex justify-between text-muted-foreground">
+            <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-widest text-[var(--qd-accent)]">
+              Proforma · Not a tax invoice
+            </p>
+            <dl className="mt-4 grid grid-cols-[auto_auto] gap-x-6 gap-y-1 text-xs @2xl:justify-end">
+              <Meta k="Quotation no." v={q.quote_no} strong />
+              <Meta k="Date" v={fmtDate(q.quote_date)} />
+              <Meta k="Supply" v={igst ? "Inter-state · IGST" : "Intra-state · CGST + SGST"} />
+              <Meta k="Currency" v="INR (₹)" />
+            </dl>
+          </div>
+        </header>
+
+        {/* Parties + summary */}
+        <section className="mt-8 grid gap-4 @2xl:grid-cols-[1fr_17rem]">
+          <div className="rounded-lg border border-slate-200 p-4">
+            <Label>Bill to</Label>
+            <p className="mt-1.5 text-[15px] font-semibold text-slate-900">
+              {customer?.name ?? "—"}
+            </p>
+            <div className="mt-1 space-y-0.5 text-xs text-slate-500">
+              {customer?.address && <p className="whitespace-pre-line">{customer.address}</p>}
+              {customer?.phone && <p>{customer.phone}</p>}
+              {customer?.gstin && (
+                <p className="font-medium text-slate-600">GSTIN {customer.gstin}</p>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col justify-between rounded-lg bg-[var(--qd-accent-soft)] p-4">
+            <div>
+              <Label>Quotation total</Label>
+              <p className="mt-1 font-display text-2xl font-bold tabular-nums text-slate-900">
+                {fmtMoney(t.total)}
+              </p>
+              <p className="text-[11px] text-slate-500">Inclusive of GST</p>
+            </div>
+            <div className="mt-3 flex gap-5 border-t border-slate-900/10 pt-2.5 text-xs tabular-nums text-slate-600">
               <span>
-                {fmtNum(l.qty)} {UNIT_LABELS[l.unit]} × {fmtMoney(l.unitPrice)} · GST {l.gstRate}%
+                <b className="font-semibold text-slate-900">{lines.length}</b>{" "}
+                {lines.length === 1 ? "item" : "items"}
               </span>
-              <span className="font-semibold text-foreground">{fmtMoney(t.lines[i]!.taxable)}</span>
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {[
-                l.hsn && `HSN ${l.hsn}`,
-                l.weightKg > 0 && `${fmtNum(lineWeight(l))} kg @ ${fmtMoney(l.rateKg)}/kg`,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </li>
-        ))}
-      </ul>
-      <table className="mt-2 hidden w-full tabular-nums @2xl:table print:table">
-        <thead>
-          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <th className="py-2 pr-2">#</th>
-            <th>Item</th>
-            <th>HSN</th>
-            <th className="text-right">Qty</th>
-            <th className="text-right">Kg</th>
-            <th className="text-right">₹/kg</th>
-            <th className="text-right">Rate</th>
-            <th className="text-right">GST</th>
-            <th className="text-right">Taxable</th>
-          </tr>
-        </thead>
-        <tbody>
+              {totalKg > 0 && (
+                <span>
+                  <b className="font-semibold text-slate-900">{fmtNum(totalKg)}</b> kg total
+                </span>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Items: stacked on phones, table on desktop/print */}
+        <ul className="mt-6 divide-y divide-slate-200 border-y border-slate-200 tabular-nums @2xl:hidden print:hidden">
           {lines.map((l, i) => (
-            <tr key={i} className="border-b border-border/50 align-top">
-              <td className="py-2.5 pr-2 text-muted-foreground">{i + 1}</td>
-              <td className="pr-3 font-medium">{l.description}</td>
-              <td className="pr-2 text-muted-foreground">{l.hsn ?? "—"}</td>
-              <td className="text-right">
-                {fmtNum(l.qty)} {UNIT_LABELS[l.unit]}
-              </td>
-              <td className="text-right">{l.weightKg > 0 ? fmtNum(lineWeight(l)) : "—"}</td>
-              <td className="text-right">{l.weightKg > 0 ? fmtNum(l.rateKg) : "—"}</td>
-              <td className="text-right">
-                {fmtNum(l.unitPrice)}/{UNIT_LABELS[l.unit]}
-              </td>
-              <td className="text-right">{l.gstRate}%</td>
-              <td className="text-right font-semibold">{fmtMoney(t.lines[i]!.taxable)}</td>
-            </tr>
+            <li key={i} className="flex gap-3 py-3.5">
+              {specs[i] && <PipeSection spec={specs[i]!} size={44} />}
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold leading-snug text-slate-900">
+                  <span className="mr-1.5 text-slate-400">{i + 1}.</span>
+                  {l.description}
+                </p>
+                <SpecLine spec={specs[i]} />
+                <p className="mt-1.5 flex justify-between gap-3 text-xs text-slate-500">
+                  <span>
+                    {fmtNum(l.qty)} {UNIT_LABELS[l.unit]} × {fmtMoney(l.unitPrice)} · GST{" "}
+                    {l.gstRate}%
+                  </span>
+                  <span className="text-[13px] font-semibold text-slate-900">
+                    {fmtMoney(t.lines[i]!.taxable)}
+                  </span>
+                </p>
+                <WeightLine l={l} />
+              </div>
+            </li>
           ))}
           {t.extra.taxable > 0 && (
-            <tr className="border-b border-border/50">
-              <td />
-              <td className="py-2.5 font-medium">Forwarding charges</td>
-              <td />
-              <td />
-              <td />
-              <td />
-              <td />
-              <td />
-              <td className="text-right font-semibold">{fmtMoney(t.extra.taxable)}</td>
+            <li className="flex justify-between py-3 font-medium">
+              <span>Forwarding charges</span>
+              <span className="font-semibold">{fmtMoney(t.extra.taxable)}</span>
+            </li>
+          )}
+        </ul>
+        <table className="mt-8 hidden w-full border-collapse tabular-nums @2xl:table print:table">
+          <thead>
+            <tr className="border-y border-slate-300 bg-slate-50 text-left text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
+              <th className="w-8 py-2.5 pl-3 font-semibold">#</th>
+              <th className="py-2.5 font-semibold">Item &amp; specification</th>
+              <th className="px-2 py-2.5 font-semibold">HSN</th>
+              <th className="px-2 py-2.5 text-right font-semibold">Qty</th>
+              <th className="px-2 py-2.5 text-right font-semibold">Rate</th>
+              <th className="px-2 py-2.5 text-right font-semibold">GST</th>
+              <th className="py-2.5 pr-3 text-right font-semibold">Amount</th>
             </tr>
-          )}
-        </tbody>
-      </table>
-
-      <div className="mt-4 grid gap-5 @2xl:grid-cols-[1fr_18rem]">
-        {/* GST summary by HSN & rate */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs tabular-nums">
-            <thead>
-              <tr className="border-b border-border text-left uppercase tracking-wide text-muted-foreground">
-                <th className="py-1.5">HSN</th>
-                <th className="text-right">Taxable</th>
-                {igst ? (
-                  <th className="text-right">IGST</th>
-                ) : (
-                  <>
-                    <th className="text-right">CGST</th>
-                    <th className="text-right">SGST</th>
-                  </>
-                )}
+          </thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={i} className="break-inside-avoid border-b border-slate-200 align-top">
+                <td className="py-3.5 pl-3 text-slate-400">{i + 1}</td>
+                <td className="py-3 pr-3">
+                  <div className="flex items-center gap-3">
+                    {specs[i] && <PipeSection spec={specs[i]!} />}
+                    <div className="min-w-0">
+                      <p className="font-semibold leading-snug text-slate-900">{l.description}</p>
+                      <SpecLine spec={specs[i]} />
+                      <WeightLine l={l} />
+                    </div>
+                  </div>
+                </td>
+                <td className="whitespace-nowrap px-2 py-3.5 text-xs text-slate-500">
+                  {l.hsn ?? "—"}
+                </td>
+                <td className="whitespace-nowrap px-2 py-3.5 text-right">
+                  {fmtNum(l.qty)} <span className="text-slate-500">{UNIT_LABELS[l.unit]}</span>
+                </td>
+                <td className="whitespace-nowrap px-2 py-3.5 text-right">
+                  {fmtMoney(l.unitPrice)}
+                  <span className="text-slate-500">/{UNIT_LABELS[l.unit]}</span>
+                </td>
+                <td className="px-2 py-3.5 text-right text-slate-500">{l.gstRate}%</td>
+                <td className="whitespace-nowrap py-3.5 pr-3 text-right font-semibold text-slate-900">
+                  {fmtMoney(t.lines[i]!.taxable)}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {t.groups.map((g) => (
-                <tr key={`${g.hsn}${g.rate}`} className="border-b border-border/50">
-                  <td className="py-1.5">{g.hsn}</td>
-                  <td className="text-right">{fmtMoney(g.taxable)}</td>
-                  {igst ? (
-                    <td className="text-right">
-                      {g.rate}% · {fmtMoney(g.tax)}
-                    </td>
-                  ) : (
-                    <>
-                      <td className="text-right">
-                        {g.rate / 2}% · {fmtMoney(g.tax / 2)}
-                      </td>
-                      <td className="text-right">
-                        {g.rate / 2}% · {fmtMoney(g.tax / 2)}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+            {t.extra.taxable > 0 && (
+              <tr className="border-b border-slate-200">
+                <td />
+                <td className="py-3 font-medium text-slate-900">Forwarding charges</td>
+                <td colSpan={4} />
+                <td className="py-3 pr-3 text-right font-semibold text-slate-900">
+                  {fmtMoney(t.extra.taxable)}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
 
-        <div className="space-y-1.5 tabular-nums">
-          <Row k="Taxable value" v={fmtMoney(t.taxable)} />
-          {igst ? (
-            <Row k="IGST" v={fmtMoney(t.igst)} />
-          ) : (
-            <>
-              <Row k="CGST" v={fmtMoney(t.cgst)} />
-              <Row k="SGST" v={fmtMoney(t.sgst)} />
-            </>
-          )}
-          {t.roundOff !== 0 && <Row k="Round off" v={fmtMoney(t.roundOff)} />}
-          <div className="flex items-baseline justify-between border-t border-border pt-2">
-            <span className="font-semibold">Total (INR)</span>
-            <span className="text-xl font-bold">{fmtMoney(t.total)}</span>
+        {/* Tax summary + totals */}
+        <section className="mt-6 grid break-inside-avoid gap-6 @2xl:grid-cols-[1fr_19rem] print:grid-cols-[1fr_19rem]">
+          <div className="space-y-4">
+            <div className="overflow-x-auto">
+              <Label>Tax summary</Label>
+              <table className="mt-2 w-full text-xs tabular-nums">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-[10.5px] uppercase tracking-wider text-slate-500">
+                    <th className="py-1.5 font-semibold">HSN / SAC</th>
+                    <th className="py-1.5 text-right font-semibold">Taxable</th>
+                    {igst ? (
+                      <th className="py-1.5 text-right font-semibold">IGST</th>
+                    ) : (
+                      <>
+                        <th className="py-1.5 text-right font-semibold">CGST</th>
+                        <th className="py-1.5 text-right font-semibold">SGST</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {t.groups.map((g) => (
+                    <tr key={`${g.hsn}${g.rate}`} className="border-b border-slate-100">
+                      <td className="py-1.5 text-slate-600">{g.hsn}</td>
+                      <td className="py-1.5 text-right">{fmtMoney(g.taxable)}</td>
+                      {igst ? (
+                        <td className="py-1.5 text-right">
+                          <span className="text-slate-400">{g.rate}%</span> {fmtMoney(g.tax)}
+                        </td>
+                      ) : (
+                        <>
+                          <td className="py-1.5 text-right">
+                            <span className="text-slate-400">{g.rate / 2}%</span>{" "}
+                            {fmtMoney(g.tax / 2)}
+                          </td>
+                          <td className="py-1.5 text-right">
+                            <span className="text-slate-400">{g.rate / 2}%</span>{" "}
+                            {fmtMoney(g.tax / 2)}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <Label>Amount in words</Label>
+              <p className="mt-1 font-semibold text-slate-900">{inWords(t.total)}</p>
+            </div>
           </div>
-        </div>
-      </div>
-      <p className="mt-3 border-y border-border py-2 text-xs">
-        <span className="text-muted-foreground">Amount in words: </span>
-        <span className="font-semibold">{inWords(t.total)}</span>
-      </p>
 
-      <footer className="mt-4 grid gap-5 text-xs @md:grid-cols-2">
-        <div className="space-y-3">
-          {(termList.length > 0 || q.notes) && (
-            <div>
-              <p className="mb-1 font-semibold uppercase tracking-wide text-muted-foreground">
-                Terms & conditions
-              </p>
-              <ol className="list-decimal space-y-0.5 pl-4">
-                {termList.map((t) => (
-                  <li key={t}>{t}</li>
-                ))}
-              </ol>
-              {q.notes && <p className="mt-1 whitespace-pre-line">{q.notes}</p>}
-            </div>
-          )}
-          {(brand?.bank_account || brand?.upi_id) && (
-            <div>
-              <p className="mb-1 font-semibold uppercase tracking-wide text-muted-foreground">
-                Bank & UPI
-              </p>
-              {brand.bank_name && <p>{brand.bank_name}</p>}
-              {brand.bank_account && (
-                <p>
-                  A/c {brand.bank_account}
-                  {brand.bank_ifsc ? ` · IFSC ${brand.bank_ifsc}` : ""}
-                </p>
+          <div className="h-fit overflow-hidden rounded-lg border border-slate-200 tabular-nums">
+            <div className="space-y-2 p-4">
+              <Row k="Sub-total (taxable)" v={fmtMoney(t.taxable)} />
+              {igst ? (
+                <Row k="IGST" v={fmtMoney(t.igst)} />
+              ) : (
+                <>
+                  <Row k="CGST" v={fmtMoney(t.cgst)} />
+                  <Row k="SGST" v={fmtMoney(t.sgst)} />
+                </>
               )}
-              {brand.upi_id && <p>UPI {brand.upi_id}</p>}
+              {t.roundOff !== 0 && <Row k="Round off" v={fmtMoney(t.roundOff)} />}
             </div>
-          )}
-        </div>
-        <div className="flex flex-col justify-end @md:items-end">
-          <p className="font-semibold">
-            For {brand?.tagline?.replace(/^by\s+/i, "") || brand?.name}
-          </p>
-          <div className="h-12" />
-          <p className="text-muted-foreground">Authorised signatory</p>
-        </div>
-      </footer>
-      <p className="mt-6 text-center text-[11px] text-muted-foreground">
-        Proforma quotation, not a tax invoice. Prices subject to final confirmation.
-      </p>
+            <div className="flex items-baseline justify-between bg-[var(--qd-accent)] px-4 py-3 text-white">
+              <span className="text-xs font-semibold uppercase tracking-wider">Grand total</span>
+              <span className="font-display text-xl font-bold">{fmtMoney(t.total)}</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Terms, bank, signature */}
+        <footer className="mt-8 grid break-inside-avoid gap-6 border-t border-slate-200 pt-6 text-xs @2xl:grid-cols-[1fr_15rem] print:grid-cols-[1fr_15rem]">
+          <div className="space-y-5">
+            {(termList.length > 0 || q.notes) && (
+              <div>
+                <Label>Terms &amp; conditions</Label>
+                <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-slate-600 marker:text-slate-400">
+                  {termList.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ol>
+                {q.notes && <p className="mt-2 whitespace-pre-line text-slate-600">{q.notes}</p>}
+              </div>
+            )}
+            {(brand?.bank_account || brand?.upi_id) && (
+              <div>
+                <Label>Payment details</Label>
+                <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-slate-600">
+                  {brand.bank_name && <Meta k="Bank" v={brand.bank_name} />}
+                  {brand.bank_account && <Meta k="Account no." v={brand.bank_account} />}
+                  {brand.bank_ifsc && <Meta k="IFSC" v={brand.bank_ifsc} />}
+                  {brand.upi_id && <Meta k="UPI" v={brand.upi_id} />}
+                </dl>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col justify-end text-center @2xl:items-stretch">
+            <p className="font-semibold text-slate-900">For {signFor}</p>
+            <div className="h-16" />
+            <p className="border-t border-slate-300 pt-1.5 text-slate-500">Authorised signatory</p>
+          </div>
+        </footer>
+
+        <p className="mt-8 flex flex-wrap justify-between gap-2 border-t border-slate-100 pt-3 text-[10.5px] text-slate-400">
+          <span>
+            Computer-generated quotation · {q.quote_no}. Prices subject to final confirmation.
+          </span>
+          {brand?.name && <span>{brand.name}</span>}
+        </p>
+      </div>
     </article>
   );
 }
 
+function SpecLine({ spec }: { spec: PipeSpec | null | undefined }) {
+  if (!spec) return null;
+  const parts: ReactNode[] = [
+    <Spec key="od" k="OD" v={`${fmtNum(spec.od)} mm`} />,
+    spec.wall && <Spec key="e" k="Wall" v={`${fmtNum(spec.wall, 1)} mm`} />,
+    spec.sdr && <Spec key="sdr" k="SDR" v={fmtNum(spec.sdr, 1)} />,
+  ].filter(Boolean);
+  return <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">{parts}</p>;
+}
+
+function WeightLine({ l }: { l: QuoteData["lines"][number] }) {
+  if (!(l.weightKg > 0)) return null;
+  return (
+    <p className="mt-0.5 text-[11px] tabular-nums text-slate-400">
+      {fmtNum(l.weightKg, 3)} kg/{UNIT_LABELS[l.unit]} · {fmtNum(lineWeight(l))} kg @{" "}
+      {fmtMoney(l.rateKg)}/kg
+    </p>
+  );
+}
+
+const Spec = ({ k, v }: { k: string; v: string }) => (
+  <span className="whitespace-nowrap">
+    <span className="text-slate-400">{k}</span>{" "}
+    <span className="font-medium text-[var(--qd-accent)]">{v}</span>
+  </span>
+);
+
+const Label = ({ children }: { children: ReactNode }) => (
+  <p className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">{children}</p>
+);
+
+const Meta = ({ k, v, strong }: { k: string; v: string; strong?: boolean }) => (
+  <>
+    <dt className="text-slate-500">{k}</dt>
+    <dd className={strong ? "font-semibold text-slate-900" : "text-slate-800"}>{v}</dd>
+  </>
+);
+
 const Row = ({ k, v }: { k: string; v: string }) => (
   <div className="flex justify-between">
-    <span className="text-muted-foreground">{k}</span>
-    <span>{v}</span>
+    <span className="text-slate-500">{k}</span>
+    <span className="text-slate-900">{v}</span>
   </div>
 );

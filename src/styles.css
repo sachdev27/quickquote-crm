@@ -110,13 +110,35 @@
   }
 }
 
+/* Quotation sheet: fixed paper palette, same in light and dark mode */
+.quote-doc {
+  --qd-accent: oklch(0.42 0.09 235);
+  --qd-accent-soft: oklch(0.96 0.018 235);
+  color-scheme: light;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
 /* Print: only the invoice shows */
+@page {
+  size: A4;
+  margin: 12mm 12mm 14mm;
+}
 @media print {
+  .quote-doc {
+    border-radius: 0 !important;
+    font-size: 11.5px !important;
+  }
+  .quote-doc thead {
+    display: table-header-group;
+  }
   .no-print {
     display: none !important;
   }
-  body {
-    background: white;
+  body,
+  :has(> .print-sheet),
+  :has(.print-sheet) {
+    background: white !important;
   }
   .print-sheet {
     box-shadow: none !important;

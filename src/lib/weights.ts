@@ -13,8 +13,12 @@ export function sdrFor(grade: string, pn: number): number | null {
   return SDR_SERIES.find((sdr) => (16 * s) / (sdr - 1) >= pn - 0.4) ?? null;
 }
 
+// Minimum wall (mm) for an OD and SDR, as IS 4984 rounds it.
+export const wallFor = (od: number, sdr: number) =>
+  Math.max(2, Math.ceil((od / sdr) * 10 - 1e-9) / 10);
+
 export function pipeKgPerM(od: number, sdr: number): number {
-  const e = Math.max(2, Math.ceil((od / sdr) * 10 - 1e-9) / 10);
+  const e = wallFor(od, sdr);
   return (Math.PI * (od - e) * e * PE_DENSITY) / 1000;
 }
 
