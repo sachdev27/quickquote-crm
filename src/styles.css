@@ -110,6 +110,14 @@
   }
 }
 
+/* Desktop density: a 14px root makes every rem-based size (type, spacing, controls) about 12% tighter,
+   so pages need less scrolling. Phones keep 16px for tap targets; print resets to 16px below. */
+@media (min-width: 1024px) {
+  html {
+    font-size: 14px;
+  }
+}
+
 /* Quotation sheet: an A4 page (ISO 216, 210 × 297 mm). Fixed paper palette in light and dark mode.
    Body text 8.5–9pt for a dense commercial document, line height ~135%. */
 .quote-doc {
@@ -158,6 +166,9 @@
   display: none;
 }
 @media print {
+  html {
+    font-size: 16px !important;
+  }
   .no-print {
     display: none !important;
   }
@@ -196,10 +207,10 @@
     display: table-footer-group;
   }
   .qd-pad-top {
-    height: 10mm;
+    height: 8mm;
   }
   .qd-pad-bottom {
-    height: 12mm;
+    height: 9mm;
   }
   .print-sheet {
     box-shadow: none !important;

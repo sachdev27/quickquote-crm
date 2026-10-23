@@ -14,7 +14,7 @@ import {
 import { toast } from "sonner";
 import { recall, remember } from "@/lib/utils";
 import { PageShell } from "@/components/bottom-nav";
-import { Chips, StatusPill, inputCls } from "@/components/qq";
+import { Chips, StatusPill, inputCls, inputSm } from "@/components/qq";
 import { KanbanBoard } from "@/components/kanban-board";
 import { STATUS_LABELS, fmtMoney, type Stage } from "@/lib/quote";
 import {
@@ -44,6 +44,7 @@ function Dashboard() {
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
+  const [brand, setBrand] = useState("all");
   const search = Route.useSearch();
   const navigate = useNavigate();
   const [view, setViewState] = useState<"list" | "pipeline">(
@@ -86,6 +87,13 @@ function Dashboard() {
   });
 
   const all = quotes.data ?? [];
+  const brands = [
+    ...new Set(
+      [...all.map((r) => r.brand_name), ...(enqs.data ?? []).map((e) => e.brand)].filter(
+        (b): b is string => !!b,
+      ),
+    ),
+  ].sort();
   const rows = all.filter(
     (r) =>
       (status === "all" || view === "pipeline" || r.status === status) &&
@@ -127,7 +135,7 @@ function Dashboard() {
 
   return (
     <PageShell title="Quotes" wide>
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:mb-2 lg:grid-cols-4 lg:gap-2">
         <Stat
           label={`Pipeline · ${open.length} open`}
           value={fmtMoney(open.reduce((s, r) => s + r.total, 0))}
@@ -153,7 +161,7 @@ function Dashboard() {
           type="button"
           onClick={toggleInsights}
           aria-expanded={insightsOpen}
-          className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground"
+          className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground lg:mb-1.5 lg:text-xs"
         >
           <ChevronDown
             className={`h-4 w-4 transition-transform ${insightsOpen ? "" : "-rotate-90"}`}
@@ -240,11 +248,11 @@ function Dashboard() {
         </div>
       )}
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2 lg:mb-2">
         <div
           role="radiogroup"
           aria-label="View"
-          className="inline-flex h-12 shrink-0 rounded-xl border border-border bg-card p-1 lg:h-10"
+          className="inline-flex h-12 shrink-0 rounded-xl border border-border bg-card p-1 lg:h-8 lg:rounded-lg lg:p-0.5"
         >
           {(
             [
@@ -258,7 +266,7 @@ function Dashboard() {
               role="radio"
               aria-checked={view === v}
               onClick={() => setView(v)}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 text-sm font-semibold transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 text-sm font-semibold transition-colors lg:rounded-md lg:px-2.5 lg:text-[13px] ${
                 view === v
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -272,11 +280,31 @@ function Dashboard() {
           placeholder="Search quote, customer or brand"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          className={`${inputCls} min-w-[12rem] flex-1 lg:max-w-sm`}
+          className={`${inputSm} min-w-[12rem] flex-1 lg:max-w-xs`}
         />
+        {view === "pipeline" && brands.length > 1 && (
+          <div className="hidden items-center gap-1 lg:flex" role="radiogroup" aria-label="Brand">
+            {["all", ...brands].map((b) => (
+              <button
+                key={b}
+                type="button"
+                role="radio"
+                aria-checked={brand === b}
+                onClick={() => setBrand(b)}
+                className={`h-8 rounded-lg border px-2.5 text-[13px] font-semibold transition-colors ${
+                  brand === b
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {b === "all" ? "All brands" : b}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       {view === "list" && (
-        <div className="mb-4">
+        <div className="mb-4 lg:mb-2">
           <Chips
             label="Status filter"
             value={status}
@@ -318,6 +346,7 @@ function Dashboard() {
             `${x.e.title} ${x.customer ?? ""}`.toLowerCase().includes(q.toLowerCase()),
           )}
           followUps={follow.data ?? []}
+          brand={brand}
           onMove={move}
           onOpenEnquiry={(e) => setEnqOpen({ e })}
           onNewEnquiry={() => setEnqOpen({ e: null })}
@@ -458,9 +487,9 @@ function DesktopQuotes({ rows }: { rows: QRow[] }) {
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <div className="rounded-2xl border border-border bg-card p-4 lg:flex lg:items-baseline lg:justify-between lg:gap-2 lg:rounded-lg lg:px-3 lg:py-1.5">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className={`text-xl font-bold tabular-nums ${tone ?? ""}`}>{value}</p>
+      <p className={`text-xl font-bold tabular-nums lg:text-base ${tone ?? ""}`}>{value}</p>
     </div>
   );
 }

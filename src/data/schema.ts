@@ -208,3 +208,37 @@ export const quote_audit = sqliteTable("quote_audit", {
   by: text("by"),
   what: text("what").notNull(),
 });
+
+// Tax invoice issued from a quote: a snapshot of the buyer and lines at the time of issue.
+export const invoices = sqliteTable("invoices", {
+  id: id(),
+  invoice_no: text("invoice_no").notNull().unique(),
+  quote_id: text("quote_id").notNull().unique(),
+  brand_id: text("brand_id").notNull(),
+  invoice_date: text("invoice_date").notNull(),
+  igst: integer("igst").notNull().default(0),
+  extra_charges: real("extra_charges").notNull().default(0),
+  notes: text("notes"),
+  terms: text("terms"),
+  buyer_name: text("buyer_name"),
+  buyer_address: text("buyer_address"),
+  buyer_phone: text("buyer_phone"),
+  buyer_gstin: text("buyer_gstin"),
+  created_by: text("created_by"),
+  created_at: now(),
+});
+
+export const invoice_items = sqliteTable("invoice_items", {
+  id: id(),
+  invoice_id: text("invoice_id").notNull(),
+  position: integer("position").notNull().default(0),
+  category: text("category").notNull(),
+  description: text("description").notNull(),
+  hsn: text("hsn"),
+  unit: text("unit").notNull().default("m"),
+  qty: real("qty").notNull(),
+  weight_kg: real("weight_kg").notNull().default(0),
+  rate_kg: real("rate_kg").notNull().default(0),
+  unit_price: real("unit_price").notNull(),
+  gst_rate: real("gst_rate").notNull().default(18),
+});

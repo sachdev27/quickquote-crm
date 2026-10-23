@@ -4,6 +4,7 @@ import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { computeTotals, fmtMoney, nextQuoteNo, type Line } from "@/lib/quote";
 import { describeChanges, type AuditSnap } from "@/lib/audit";
+import { invoiceNoOf, invoicePrefix, todayIST } from "@/lib/invoice";
 import { adminOnly, authed } from "./auth.server";
 import { getDb } from "./env.server";
 import {
@@ -23,6 +24,8 @@ import {
   enquiries,
   contacts,
   quote_audit,
+  invoices,
+  invoice_items,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -589,7 +592,7 @@ export const getQuote = createServerFn({ method: "GET" })
     const db = await getDb();
     const [q] = await db.select().from(quotes).where(eq(quotes.id, data.id));
     if (!q) throw new Error("Quote not found");
-    const [[brand], customer, items] = await Promise.all([
+    const [[brand], customer, items, [invoice]] = await Promise.all([
       db.select().from(brands).where(eq(brands.id, q.brand_id)),
       q.customer_id
         ? db.select().from(customers).where(eq(customers.id, q.customer_id))
@@ -599,8 +602,13 @@ export const getQuote = createServerFn({ method: "GET" })
         .from(quote_items)
         .where(eq(quote_items.quote_id, q.id))
         .orderBy(quote_items.position),
+      db
+        .select({ id: invoices.id, invoice_no: invoices.invoice_no })
+        .from(invoices)
+        .where(eq(invoices.quote_id, q.id)),
     ]);
     return {
+      invoice: invoice ?? null,
       quote: q,
       brand: brand ?? null,
       customer: customer[0] ?? null,
@@ -847,6 +855,183 @@ export const listAudit = createServerFn({ method: "GET" })
       .limit(200),
   );
 
+// ---------- tax invoices ----------
+// Issue a tax invoice from a quotation. One per quote (asking again returns the existing one).
+// The invoice copies the buyer and lines, so later quote edits never change it. The quote moves to Won.
+export const createInvoiceFromQuote = createServerFn({ method: "POST" })
+  .middleware([authed])
+  .validator(z.object({ quoteId: z.string() }))
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    const existing = async () =>
+      (
+        await db
+          .select({ id: invoices.id, no: invoices.invoice_no })
+          .from(invoices)
+          .where(eq(invoices.quote_id, data.quoteId))
+      )[0];
+    const had = await existing();
+    if (had) return { id: had.id, invoiceNo: had.no, created: false };
+
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, data.quoteId));
+    if (!q) throw new Error("Quote not found");
+    const [[brand], [cust], items] = await Promise.all([
+      db.select().from(brands).where(eq(brands.id, q.brand_id)),
+      q.customer_id
+        ? db.select().from(customers).where(eq(customers.id, q.customer_id))
+        : Promise.resolve([]),
+      db
+        .select()
+        .from(quote_items)
+        .where(eq(quote_items.quote_id, q.id))
+        .orderBy(quote_items.position),
+    ]);
+    if (!brand) throw new Error("Brand not found");
+    if (!items.length) throw new Error("The quote has no items");
+
+    const date = todayIST();
+    const prefix = invoicePrefix(brand.code, date);
+    const [counted] = await db
+      .select({ n: count() })
+      .from(invoices)
+      .where(sql`${invoices.invoice_no} like ${prefix + "%"}`);
+    const n = counted?.n ?? 0;
+    const id = crypto.randomUUID();
+    const moveToWon = q.stage !== "won";
+    // Invoice no. is unique; if two people issue at once the batch fails atomically and we take the next number.
+    for (let i = 0; i < 5; i++) {
+      const invoiceNo = invoiceNoOf(brand.code, date, n + i + 1);
+      try {
+        await db.batch([
+          db.insert(invoices).values({
+            id,
+            invoice_no: invoiceNo,
+            quote_id: q.id,
+            brand_id: brand.id,
+            invoice_date: date,
+            igst: q.igst,
+            extra_charges: q.extra_charges,
+            notes: q.notes,
+            terms: q.terms,
+            buyer_name: cust?.name ?? null,
+            buyer_address: cust?.address ?? null,
+            buyer_phone: cust?.phone ?? null,
+            buyer_gstin: cust?.gstin ?? null,
+            created_by: context.user,
+          }),
+          ...items.map((it) =>
+            db.insert(invoice_items).values({
+              invoice_id: id,
+              position: it.position,
+              category: it.category,
+              description: it.description,
+              hsn: it.hsn,
+              unit: it.unit,
+              qty: it.qty,
+              weight_kg: it.weight_kg,
+              rate_kg: it.rate_kg,
+              unit_price: it.unit_price,
+              gst_rate: it.gst_rate,
+            }),
+          ),
+          db.insert(quote_audit).values({
+            quote_id: q.id,
+            by: context.user,
+            what: `Tax invoice ${invoiceNo} issued${moveToWon ? `; stage ${q.stage} → won` : ""}`,
+          }),
+          db
+            .update(quotes)
+            .set({ stage: "won", status: "won", updated_at: new Date().toISOString() })
+            .where(eq(quotes.id, q.id)),
+        ]);
+        return { id, invoiceNo, created: true };
+      } catch (e) {
+        if (!String(e).includes("UNIQUE") || i === 4) throw e;
+        const raced = await existing(); // someone else just issued this quote's invoice
+        if (raced) return { id: raced.id, invoiceNo: raced.no, created: false };
+      }
+    }
+    throw new Error("unreachable");
+  });
+
+const toInvoiceLine = (r: typeof invoice_items.$inferSelect): Line => ({
+  productId: null,
+  rateGroupId: null,
+  category: r.category as Line["category"],
+  description: r.description,
+  hsn: r.hsn,
+  unit: r.unit as Line["unit"],
+  qty: r.qty,
+  weightKg: r.weight_kg,
+  rateKg: r.rate_kg,
+  unitPrice: r.unit_price,
+  gstRate: r.gst_rate,
+});
+
+export const getInvoice = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const [inv] = await db.select().from(invoices).where(eq(invoices.id, data.id));
+    if (!inv) throw new Error("Invoice not found");
+    const [[brand], [quote], items] = await Promise.all([
+      db.select().from(brands).where(eq(brands.id, inv.brand_id)),
+      db
+        .select({ no: quotes.quote_no, date: quotes.quote_date })
+        .from(quotes)
+        .where(eq(quotes.id, inv.quote_id)),
+      db
+        .select()
+        .from(invoice_items)
+        .where(eq(invoice_items.invoice_id, inv.id))
+        .orderBy(invoice_items.position),
+    ]);
+    return {
+      invoice: inv,
+      brand: brand ?? null,
+      quoteNo: quote?.no ?? null,
+      quoteDate: quote?.date ?? null,
+      lines: items.map(toInvoiceLine),
+    };
+  });
+
+export const listInvoices = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .handler(async () => {
+    const db = await getDb();
+    const rows = await db
+      .select({ inv: invoices, brand: brands.name })
+      .from(invoices)
+      .leftJoin(brands, eq(brands.id, invoices.brand_id))
+      .orderBy(desc(invoices.created_at))
+      .limit(300);
+    const items = rows.length
+      ? await db
+          .select()
+          .from(invoice_items)
+          .where(
+            inArray(
+              invoice_items.invoice_id,
+              rows.map((r) => r.inv.id),
+            ),
+          )
+      : [];
+    return rows.map(({ inv, brand }) => ({
+      id: inv.id,
+      invoice_no: inv.invoice_no,
+      invoice_date: inv.invoice_date,
+      quote_id: inv.quote_id,
+      brand_name: brand,
+      customer_name: inv.buyer_name,
+      total: computeTotals(
+        items.filter((i) => i.invoice_id === inv.id).map(toInvoiceLine),
+        inv.extra_charges,
+        { inclusive: false, igst: !!inv.igst },
+      ).total,
+    }));
+  });
+
 export const setQuoteStatus = createServerFn({ method: "POST" })
   .middleware([authed])
   .validator(
@@ -988,6 +1173,12 @@ export const deleteQuote = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const db = await getDb();
+    const [inv] = await db
+      .select({ no: invoices.invoice_no })
+      .from(invoices)
+      .where(eq(invoices.quote_id, data.id));
+    if (inv)
+      throw new Error(`Tax invoice ${inv.no} was issued from this quote; it can't be deleted.`);
     await db.batch([
       db.delete(quote_items).where(eq(quote_items.quote_id, data.id)),
       db.delete(quote_audit).where(eq(quote_audit.quote_id, data.id)),
