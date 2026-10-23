@@ -34,6 +34,8 @@ import {
   lineGross,
   lineWeight,
   ratePerKg,
+  SPRINKLER_GROUP,
+  sprinklerRateKg,
   withBrandRaw,
   type Category,
   type Line,
@@ -70,20 +72,21 @@ type RateForm = {
 
 const num = (s: string) => (s === "" || isNaN(+s) ? 0 : +s);
 const uniq = <T,>(xs: T[]) => [...new Set(xs)];
-const formRate = (f: RateForm | undefined, nonIsi = false) =>
-  f
-    ? ratePerKg(
-        {
-          raw_kg: num(f.raw),
-          raw_kg_non_isi: f.rawNonIsi.trim() === "" ? null : num(f.rawNonIsi),
-          production_kg: num(f.production),
-          transport_kg: num(f.transport),
-          margin: num(f.margin),
-          margin_is_pct: f.pct ? 1 : 0,
-        },
-        nonIsi,
-      )
-    : 0;
+const formToRate = (f: RateForm): Rate => ({
+  raw_kg: num(f.raw),
+  raw_kg_non_isi: f.rawNonIsi.trim() === "" ? null : num(f.rawNonIsi),
+  production_kg: num(f.production),
+  transport_kg: num(f.transport),
+  margin: num(f.margin),
+  margin_is_pct: f.pct ? 1 : 0,
+});
+// Sprinkler is priced per piece, so its ₹/kg depends on the piece weight (see sprinklerPrice).
+const formRate = (f: RateForm | undefined, nonIsi = false, group = "", weightKg = 0) =>
+  !f
+    ? 0
+    : group === SPRINKLER_GROUP
+      ? sprinklerRateKg(formToRate(f), weightKg, nonIsi)
+      : ratePerKg(formToRate(f), nonIsi);
 const toForm = (c: Rate): RateForm => ({
   raw: String(c.raw_kg),
   rawNonIsi: c.raw_kg_non_isi != null ? String(c.raw_kg_non_isi) : "",
@@ -205,7 +208,12 @@ function NewQuote() {
   };
   const presetName = (id: string) => pricing.data?.presets.find((p) => p.id === id)?.name ?? "";
 
-  const rateOf = (id: string | null) => (id ? formRate(rates[id], nonIsi) : 0);
+  // Sprinkler weights belong to a brand; a product with no brand is offered to every brand.
+  const catalog = (prods.data ?? []).filter(
+    (p) => p.category !== "sprinkler" || !p.brand_id || p.brand_id === brandId,
+  );
+  const rateOf = (id: string | null, weightKg = 0) =>
+    id ? formRate(rates[id], nonIsi, id, weightKg) : 0;
   // Lines priced with a separate non-ISI raw price are labelled so the quote never implies an ISI mark.
   const isNonIsiLine = (l: Line) =>
     nonIsi && !!l.rateGroupId && (rates[l.rateGroupId]?.rawNonIsi.trim() ?? "") !== "";
@@ -217,8 +225,8 @@ function NewQuote() {
     return p?.size_mm && sdr ? pipeKgPerM(p.size_mm, sdr) : l.weightKg;
   };
   const priced: Draft[] = lines.map((l) => {
-    const rateKg = l.rateEdited || !l.rateGroupId ? l.rateKg : rateOf(l.rateGroupId);
     const weightKg = lineWeightKg(l);
+    const rateKg = l.rateEdited || !l.rateGroupId ? l.rateKg : rateOf(l.rateGroupId, weightKg);
     return { ...l, weightKg, rateKg, unitPrice: weightKg > 0 ? weightKg * rateKg : l.unitPrice };
   });
   const totals = computeTotals(priced, num(extra), { inclusive: false, igst });
@@ -393,8 +401,8 @@ function NewQuote() {
         unit: p.unit as Unit,
         qty: step,
         weightKg: p.weight_kg,
-        rateKg: rateOf(p.rate_group_id),
-        unitPrice: p.weight_kg * rateOf(p.rate_group_id),
+        rateKg: rateOf(p.rate_group_id, p.weight_kg),
+        unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg),
         gstRate: p.gst_rate,
       },
       true,
@@ -485,6 +493,8 @@ function NewQuote() {
       (t) => !nums.includes(t) && t !== grade && !/^(cut|roll|r|c|complete)$/.test(t),
     );
     const out = (prods.data ?? []).filter((p) => {
+      if (p.category === "sprinkler" && p.brand_id && p.brand_id !== (brand?.id ?? brandId))
+        return false;
       if (p.category === "pipe") {
         if (nums[0] && !String(p.size_mm ?? "").startsWith(nums[0])) return false;
         if (nums[1] && !String(pnNumber(p.pn)).startsWith(nums[1])) return false;
@@ -506,7 +516,7 @@ function NewQuote() {
       return p.unit === "m" ? n * (len ?? 100) : n;
     };
     return out.slice(0, 8).map((p) => ({ p, brand, qty: qty(p) }));
-  }, [quick, prods.data, brands.data]);
+  }, [quick, prods.data, brands.data, brandId]);
 
   function quickAdd(i = qi) {
     const s = suggestions[i];
@@ -540,8 +550,8 @@ function NewQuote() {
         unit: p.unit as Unit,
         qty,
         weightKg: p.weight_kg,
-        rateKg: rateOf(p.rate_group_id),
-        unitPrice: p.weight_kg * rateOf(p.rate_group_id),
+        rateKg: rateOf(p.rate_group_id, p.weight_kg),
+        unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg),
         gstRate: p.gst_rate,
       },
       true,
@@ -748,7 +758,7 @@ function NewQuote() {
         <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] lg:items-start">
           <aside className="hidden lg:sticky lg:top-20 lg:block lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
             <CatalogPanel
-              products={prods.data ?? []}
+              products={catalog}
               rateOf={rateOf}
               onPick={addFromCatalog}
               onAddLine={(l) => addLine(l)}
@@ -812,7 +822,7 @@ function NewQuote() {
                             <span className="shrink-0 tabular-nums text-muted-foreground">
                               {fmtNum(s.qty)} {UNIT_LABELS[s.p.unit as Unit]} ·{" "}
                               <b className="text-foreground">
-                                ₹{fmtNum(s.p.weight_kg * rateOf(s.p.rate_group_id))}/
+                                ₹{fmtNum(s.p.weight_kg * rateOf(s.p.rate_group_id, s.p.weight_kg))}/
                                 {UNIT_LABELS[s.p.unit as Unit]}
                               </b>
                             </span>
@@ -1016,7 +1026,7 @@ function NewQuote() {
                   inline
                   open={sheet}
                   onOpenChange={setSheet}
-                  products={prods.data ?? []}
+                  products={catalog}
                   groups={pricing.data?.groups ?? []}
                   rateOf={rateOf}
                   onAdd={(l) => addLine(l)}
@@ -1089,8 +1099,21 @@ function NewQuote() {
                               )}
                             </span>
                             <span className="flex items-center gap-2 text-lg font-bold tabular-nums">
-                              {fmtMoney(formRate(f, nonIsi))}
-                              <span className="text-xs font-medium text-muted-foreground">/kg</span>
+                              {c.id === SPRINKLER_GROUP ? (
+                                <>
+                                  +{fmtMoney(num(f?.production ?? "") + num(f?.margin ?? ""))}
+                                  <span className="text-xs font-medium text-muted-foreground">
+                                    /pc
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  {fmtMoney(formRate(f, nonIsi))}
+                                  <span className="text-xs font-medium text-muted-foreground">
+                                    /kg
+                                  </span>
+                                </>
+                              )}
                               <ChevronDown
                                 className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
                               />
@@ -1108,9 +1131,11 @@ function NewQuote() {
                                     return {
                                       value: p.id,
                                       label: p.name,
-                                      sub: r
-                                        ? `₹${fmtNum(ratePerKg(withBrandRaw(r, brandRawFor(c.id)), nonIsi))}/kg`
-                                        : "not set",
+                                      sub: !r
+                                        ? "not set"
+                                        : c.id === SPRINKLER_GROUP
+                                          ? `+₹${fmtNum(r.production_kg + r.margin)}/pc`
+                                          : `₹${fmtNum(ratePerKg(withBrandRaw(r, brandRawFor(c.id)), nonIsi))}/kg`,
                                     };
                                   })}
                                 />
@@ -1135,7 +1160,9 @@ function NewQuote() {
                                     className={inputCls}
                                   />
                                 </Field>
-                                <Field label="Production ₹/kg">
+                                <Field
+                                  label={`Production ₹/${c.id === SPRINKLER_GROUP ? "pc" : "kg"}`}
+                                >
                                   <input
                                     inputMode="decimal"
                                     value={f.production}
@@ -1144,16 +1171,24 @@ function NewQuote() {
                                     className={inputCls}
                                   />
                                 </Field>
-                                <Field label="Transport ₹/kg">
-                                  <input
-                                    inputMode="decimal"
-                                    value={f.transport}
-                                    onFocus={(e) => e.currentTarget.select()}
-                                    onChange={set("transport")}
-                                    className={inputCls}
-                                  />
-                                </Field>
-                                <Field label={`Margin ${f.pct ? "%" : "₹/kg"}`}>
+                                {c.id !== SPRINKLER_GROUP && (
+                                  <Field label="Transport ₹/kg">
+                                    <input
+                                      inputMode="decimal"
+                                      value={f.transport}
+                                      onFocus={(e) => e.currentTarget.select()}
+                                      onChange={set("transport")}
+                                      className={inputCls}
+                                    />
+                                  </Field>
+                                )}
+                                <Field
+                                  label={
+                                    c.id === SPRINKLER_GROUP
+                                      ? "Margin ₹/pc"
+                                      : `Margin ${f.pct ? "%" : "₹/kg"}`
+                                  }
+                                >
                                   <input
                                     inputMode="decimal"
                                     value={f.margin}
@@ -1163,20 +1198,26 @@ function NewQuote() {
                                   />
                                 </Field>
                               </div>
-                              <p className="text-xs text-muted-foreground tabular-nums">
-                                Cost{" "}
-                                {fmtMoney(
-                                  costPerKg({
-                                    raw_kg: num(f.raw),
-                                    production_kg: num(f.production),
-                                    transport_kg: num(f.transport),
-                                  }),
-                                )}
-                                /kg + margin ={" "}
-                                <span className="font-semibold text-foreground">
-                                  {fmtMoney(formRate(f, nonIsi))}/kg{nonIsi ? " (Non-ISI)" : ""}
-                                </span>
-                              </p>
+                              {c.id === SPRINKLER_GROUP ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Price per piece = raw × piece weight + production + margin.
+                                </p>
+                              ) : (
+                                <p className="text-xs text-muted-foreground tabular-nums">
+                                  Cost{" "}
+                                  {fmtMoney(
+                                    costPerKg({
+                                      raw_kg: num(f.raw),
+                                      production_kg: num(f.production),
+                                      transport_kg: num(f.transport),
+                                    }),
+                                  )}
+                                  /kg + margin ={" "}
+                                  <span className="font-semibold text-foreground">
+                                    {fmtMoney(formRate(f, nonIsi))}/kg{nonIsi ? " (Non-ISI)" : ""}
+                                  </span>
+                                </p>
+                              )}
                             </div>
                           )}
                         </li>
@@ -1318,7 +1359,7 @@ function NewQuote() {
         <AddItemSheet
           open={sheet}
           onOpenChange={setSheet}
-          products={prods.data ?? []}
+          products={catalog}
           groups={pricing.data?.groups ?? []}
           rateOf={rateOf}
           onAdd={(l) => addLine(l)}
@@ -1338,7 +1379,7 @@ function CatalogPanel({
   inQuote,
 }: {
   products: Product[];
-  rateOf: (id: string | null) => number;
+  rateOf: (id: string | null, weightKg?: number) => number;
   onPick: (p: Product) => void;
   onAddLine: (l: Line) => void;
   onMore: () => void;
@@ -1356,7 +1397,7 @@ function CatalogPanel({
   const sizes = uniq(rows.map((p) => p.size_mm ?? 0)).sort((a, b) => a - b);
   const pns = uniq(rows.map((p) => p.pn ?? "")).sort((a, b) => pnNumber(a) - pnNumber(b));
   const others = products.filter((p) => p.category === cat);
-  const unitPrice = (p: Product) => p.weight_kg * rateOf(p.rate_group_id);
+  const unitPrice = (p: Product) => p.weight_kg * rateOf(p.rate_group_id, p.weight_kg);
 
   return (
     <Card title="Catalog · click to add">
@@ -1517,7 +1558,7 @@ function AddItemSheet({
   onOpenChange: (o: boolean) => void;
   products: Product[];
   groups: { id: string; name: string }[];
-  rateOf: (id: string | null) => number;
+  rateOf: (id: string | null, weightKg?: number) => number;
   onAdd: (l: Line) => void;
   inline?: boolean; // desktop: render inside the items card instead of a sheet
 }) {
@@ -1664,8 +1705,8 @@ function AddItemSheet({
   const picked = listItems.find((p) => p.id === pickId) ?? listItems[0];
   const sel = cat === "pipe" ? pipe : cat === "custom" ? undefined : picked;
 
-  const unitPriceOf = (p?: Product) => (p ? p.weight_kg * rateOf(p.rate_group_id) : 0);
-  const cuRate = cu.weight ? rateOf(cu.card) : 0;
+  const unitPriceOf = (p?: Product) => (p ? p.weight_kg * rateOf(p.rate_group_id, p.weight_kg) : 0);
+  const cuRate = cu.weight ? rateOf(cu.card, num(cu.weight)) : 0;
   const unitPrice = sel
     ? unitPriceOf(sel)
     : num(cu.weight) > 0
@@ -1741,7 +1782,7 @@ function AddItemSheet({
       unit: sel.unit as Unit,
       qty,
       weightKg: sel.weight_kg,
-      rateKg: rateOf(sel.rate_group_id),
+      rateKg: rateOf(sel.rate_group_id, sel.weight_kg),
       unitPrice,
       gstRate: sel.gst_rate,
     });
@@ -1960,7 +2001,8 @@ function AddItemSheet({
                   <span className="min-w-0">
                     <span className="block font-medium">{shortName(p)}</span>
                     <span className="block text-xs text-muted-foreground tabular-nums">
-                      {fmtNum(p.weight_kg, 3)} kg × ₹{fmtNum(rateOf(p.rate_group_id))}/kg
+                      {p.length_m ? `${p.length_m} m · ` : ""}
+                      {fmtNum(p.weight_kg, 3)} kg
                     </span>
                   </span>
                   <span className="shrink-0 text-sm font-semibold tabular-nums">{perUnit(p)}</span>
@@ -2041,7 +2083,7 @@ function AddItemSheet({
                   options={groups.map((c) => ({
                     value: c.id,
                     label: c.name,
-                    sub: `₹${fmtNum(rateOf(c.id))}/kg`,
+                    sub: `₹${fmtNum(rateOf(c.id, num(cu.weight)))}/kg`,
                   }))}
                 />
               </Field>

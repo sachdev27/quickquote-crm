@@ -8,7 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { listBrands, listPricing, listProducts } from "@/data/api";
 import { LAST_BRAND, LAST_PRESET } from "@/lib/catalog";
-import { UNIT_LABELS, fmtNum, ratePerKg, withBrandRaw, type Unit } from "@/lib/quote";
+import {
+  UNIT_LABELS,
+  fmtNum,
+  ratePerKg,
+  sprinklerPrice,
+  withBrandRaw,
+  type Unit,
+} from "@/lib/quote";
 import { recall } from "@/lib/utils";
 import { pnNumber } from "@/lib/weights";
 
@@ -55,7 +62,7 @@ function PriceList() {
   }, [pricing.data, presetId]);
 
   const brand = brands.data?.find((b) => b.id === brandId);
-  const rate = (group: string) => {
+  const rateRow = (group: string) => {
     const r = pricing.data?.rates.find(
       (x) =>
         x.profile_id === pricing.data!.activeProfileId &&
@@ -68,11 +75,18 @@ function PriceList() {
         x.brand_id === brandId &&
         x.group_id === group,
     );
-    return r ? ratePerKg(withBrandRaw(r, b), nonIsi) : 0;
+    return r && withBrandRaw(r, b);
   };
   const all = prods.data ?? [];
-  const price = (p: (typeof all)[number]) =>
-    rate(p.rate_group_id) * p.weight_kg * (withGst ? 1 + p.gst_rate / 100 : 1);
+  const price = (p: (typeof all)[number]) => {
+    const r = rateRow(p.rate_group_id);
+    const base = !r
+      ? 0
+      : p.category === "sprinkler"
+        ? sprinklerPrice(r, p.weight_kg, nonIsi)
+        : ratePerKg(r, nonIsi) * p.weight_kg;
+    return base * (withGst ? 1 + p.gst_rate / 100 : 1);
+  };
   const pipes = all.filter((p) => p.category === "pipe");
   const tables = uniq(pipes.map((p) => `${p.grade}|${p.roll ?? "complete"}`)).map((k) => {
     const [grade, roll] = k.split("|") as [string, string];
@@ -86,7 +100,10 @@ function PriceList() {
       pns: uniq(rows.map((p) => p.pn ?? "")).sort((a, b) => pnNumber(a) - pnNumber(b)),
     };
   });
-  const others = all.filter((p) => p.category !== "pipe");
+  // Fittings are bought in and priced on the quote; sprinkler weights belong to a brand.
+  const others = all.filter(
+    (p) => p.category === "sprinkler" && (!p.brand_id || p.brand_id === brandId),
+  );
   const gstRates = uniq(
     all.map(
       (p) =>

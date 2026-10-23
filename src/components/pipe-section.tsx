@@ -19,7 +19,10 @@ export function PipeSection({ spec }: { spec: PipeSpec }) {
   const py = cy + pm * Math.SQRT1_2;
   const LX = 56; // labels start here
   const hasWall = !!spec.wall && !!spec.id;
-  const label = `Pipe cross-section: OD ${fmtNum(spec.od)} mm${hasWall ? `, ID ${fmtNum(spec.id!, 1)} mm, thickness ${fmtNum(spec.wall!, 1)} mm` : ""}`;
+  const wallText = spec.wall
+    ? `${fmtNum(spec.wall, 1)}${spec.wallMax ? `–${fmtNum(spec.wallMax, 1)}` : ""} mm`
+    : "";
+  const label = `Pipe cross-section: OD ${fmtNum(spec.od)} mm${hasWall ? `, ID ${fmtNum(spec.id!, 1)} mm, thickness ${wallText}` : ""}`;
   const line = "var(--qd-accent, #0b4f7c)";
   const ink = "var(--qd-ink, #1e293b)";
   const muted = "var(--qd-muted, #64748b)";
@@ -67,14 +70,7 @@ export function PipeSection({ spec }: { spec: PipeSpec }) {
             <line x1={px} y1={py} x2={LX - 4} y2={py} />
           </g>
           <circle cx={px} cy={py} r="1.6" fill="#f97316" />
-          <Label
-            x={LX}
-            y={py + 3.5}
-            tag="Thickness"
-            value={`${fmtNum(spec.wall!, 1)} mm`}
-            ink={ink}
-            muted={muted}
-          />
+          <Label x={LX} y={py + 3.5} tag="Thickness" value={wallText} ink={ink} muted={muted} />
         </>
       )}
     </svg>

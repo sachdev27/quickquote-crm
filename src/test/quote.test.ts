@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { computeTotals, inWords, ratePerKg, withBrandRaw } from "@/lib/quote";
+import {
+  computeTotals,
+  inWords,
+  ratePerKg,
+  sprinklerPrice,
+  sprinklerRateKg,
+  withBrandRaw,
+} from "@/lib/quote";
 import { pipeKgPerM, sdrFor } from "@/lib/weights";
 import { pipeSpec } from "@/lib/pipe-spec";
 import { stateOf, validUntil } from "@/lib/quote-doc";
@@ -64,8 +71,17 @@ describe("IS 4984 weights", () => {
     expect(sdrFor("PE80", 6)).toBe(17);
     expect(sdrFor("PE100", 10)).toBe(13.6);
   });
-  it("110 mm PE63 PN6 ≈ 2.46 kg/m", () => {
-    expect(pipeKgPerM(110, 13.6)).toBeCloseTo(2.463, 2);
+  it("110 mm PE63 PN6 is 2.651 kg/m from the IS chart", () => {
+    expect(pipeKgPerM(110, 13.6)).toBe(2.651);
+  });
+});
+
+describe("sprinkler price", () => {
+  const r = { raw_kg: 70, production_kg: 100, transport_kg: 0, margin: 80, margin_is_pct: 0 };
+  it("raw × weight + production + margin, per piece", () => {
+    expect(sprinklerPrice(r, 3.2)).toBe(404); // 70 × 3.2 + 100 + 80
+    expect(sprinklerPrice(r, 2.8)).toBe(376);
+    expect(sprinklerRateKg(r, 3.2) * 3.2).toBeCloseTo(404);
   });
 });
 
@@ -92,7 +108,7 @@ describe("totals", () => {
 });
 
 describe("pipe spec", () => {
-  it("reads OD, grade, PN and the wall behind the quoted weight", () => {
+  it("reads OD, grade, PN and the IS 4984 min–max wall", () => {
     const s = pipeSpec({
       category: "pipe",
       description: 'HDPE Pipe PE63 110 mm (4") PN 6',
@@ -100,13 +116,13 @@ describe("pipe spec", () => {
       weightKg: pipeKgPerM(110, 13.6),
     });
     expect(s).toMatchObject({ od: 110, grade: "PE63", pn: "PN 6", sdr: 13.6 });
-    expect(s!.wall).toBeCloseTo(8.1, 1);
+    expect(s).toMatchObject({ wall: 8.1, wallMax: 9 });
     expect(s!.id).toBeCloseTo(93.8, 1); // 110 − 2 × 8.1
   });
-  it("falls back to IS 4984 wall without a weight; OD only for sprinkler pieces", () => {
+  it("takes the wall from IS 4984, not the weight; OD only for sprinkler pieces", () => {
     expect(
-      pipeSpec({ category: "pipe", description: "PE100 63 mm PN 10", unit: "m", weightKg: 0 }),
-    ).toMatchObject({ od: 63, wall: 4.7, id: 53.6, sdr: 13.6 });
+      pipeSpec({ category: "pipe", description: "PE100 63 mm PN 10", unit: "m", weightKg: 0.5 }),
+    ).toMatchObject({ od: 63, wall: 4.7, wallMax: 5.3, id: 53.6, sdr: 13.6 });
     expect(
       pipeSpec({
         category: "sprinkler",

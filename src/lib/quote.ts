@@ -64,6 +64,21 @@ export function ratePerKg(r: Rate, nonIsi = false): number {
   return r.margin_is_pct ? cost * (1 + r.margin / 100) : cost + r.margin;
 }
 
+// Sprinkler pipe is priced per piece: raw ₹/kg × the brand's piece weight + production ₹ + margin ₹ (both flat
+// per piece, stored in production_kg and margin of the SPRINKLER rate). Returned as the equivalent ₹/kg
+// so a line stays weight × rate.
+export const SPRINKLER_GROUP = "SPRINKLER";
+export function sprinklerPrice(r: Rate, weightKg: number, nonIsi = false): number {
+  const raw = nonIsi && r.raw_kg_non_isi != null ? r.raw_kg_non_isi : r.raw_kg;
+  return raw * weightKg + r.production_kg + r.margin;
+}
+export const sprinklerRateKg = (r: Rate, weightKg: number, nonIsi = false) =>
+  weightKg > 0 ? sprinklerPrice(r, weightKg, nonIsi) / weightKg : 0;
+
+// ₹/kg a product of this rate group sells at, given its weight.
+export const rateKgFor = (r: Rate, group: string, weightKg: number, nonIsi = false) =>
+  group === SPRINKLER_GROUP ? sprinklerRateKg(r, weightKg, nonIsi) : ratePerKg(r, nonIsi);
+
 // One quote line, ex-GST. unitPrice = weightKg × rateKg (per metre / piece); custom lines may type unitPrice directly.
 export interface Line {
   productId: string | null;
@@ -216,7 +231,7 @@ export function buildWhatsAppUrl(opts: {
   out.push("");
   opts.lines.forEach((l, i) =>
     out.push(
-      `${i + 1}. ${l.description}\n    ${fmtNum(l.qty)} ${UNIT_LABELS[l.unit]} × ${fmtMoney(l.unitPrice)}${l.weightKg ? ` (${fmtNum(lineWeight(l))} kg @ ${fmtMoney(l.rateKg)}/kg)` : ""} = ${fmtMoney(lineGross(l))}`,
+      `${i + 1}. ${l.description}\n    ${fmtNum(l.qty)} ${UNIT_LABELS[l.unit]} × ${fmtMoney(l.unitPrice)} = ${fmtMoney(lineGross(l))}`,
     ),
   );
   out.push("", `Taxable: ${fmtMoney(opts.totals.taxable)}`, `GST: ${fmtMoney(opts.totals.tax)}`);

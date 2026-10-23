@@ -202,7 +202,16 @@ export const listPricing = createServerFn({ method: "GET" })
       db.select().from(brand_raw),
     ]);
     const activeProfileId = profiles.find((p) => p.active)?.id ?? profiles[0]?.id ?? "";
-    return { profiles, activeProfileId, presets, groups, rates: values, brandRaw };
+    // Fittings are bought in: no rate card, their price is typed on the quote.
+    const notFitting = <T extends { group_id: string }>(x: T) => x.group_id !== "FITTING";
+    return {
+      profiles,
+      activeProfileId,
+      presets,
+      groups: groups.filter((g) => g.id !== "FITTING"),
+      rates: values.filter(notFitting),
+      brandRaw: brandRaw.filter(notFitting),
+    };
   });
 
 const rateValues = z.object({
@@ -465,6 +474,8 @@ export const saveProduct = createServerFn({ method: "POST" })
       unit,
       weight_kg: z.number().finite().min(0).max(10000),
       gst_rate: gst,
+      brand_id: z.string().nullable().optional(),
+      length_m: z.number().positive().max(100).nullable().optional(),
       active: z.boolean().default(true),
     }),
   )

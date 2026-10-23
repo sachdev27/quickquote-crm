@@ -48,6 +48,8 @@ import {
   fmtMoney,
   fmtNum,
   ratePerKg,
+  rateKgFor,
+  SPRINKLER_GROUP,
   withBrandRaw,
   type Category,
   type Rate,
@@ -58,6 +60,7 @@ import { csvObjects, toCsv } from "@/lib/csv";
 import { useIsDesktop } from "@/hooks/use-mobile";
 import { useMe } from "@/hooks/use-me";
 import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
+import { IS_ODS, IS_SDRS, isSpec } from "@/lib/is4984";
 
 export const Route = createFileRoute("/_authenticated/products")({
   head: () => ({ meta: [{ title: "Products & pricing — Tarko CRM" }] }),
@@ -84,6 +87,12 @@ type Tab = "pricing" | "weights" | "products";
 const n = (s: string) => Number(s) || 0;
 const parts = (r: Rate) =>
   `${fmtNum(r.raw_kg)} + ${fmtNum(r.production_kg)} + ${fmtNum(r.transport_kg)} + ${r.margin_is_pct ? `${fmtNum(r.margin)}%` : `₹${fmtNum(r.margin)}`}`;
+// "2.4–2.7 mm": the IS 4984 wall thickness for this product's grade + PN.
+const isWall = (p: Pick<Product, "grade" | "size_mm" | "pn">) => {
+  const sdr = p.grade && p.size_mm ? sdrFor(p.grade, pnNumber(p.pn)) : null;
+  const t = sdr && p.size_mm ? isSpec(p.size_mm, sdr) : null;
+  return t ? `${fmtNum(t.min, 1)}–${fmtNum(t.max, 1)} mm` : "";
+};
 const isWeight = (p: Pick<Product, "grade" | "size_mm" | "pn">) => {
   const sdr = p.grade && p.size_mm ? sdrFor(p.grade, pnNumber(p.pn)) : null;
   return sdr && p.size_mm ? pipeKgPerM(p.size_mm, sdr) : null;
@@ -174,9 +183,9 @@ function ProductsAdmin() {
   const profileName = (id: string) => pricing.data?.profiles.find((p) => p.id === id)?.name ?? "";
   const rateRow = (preset: string, group: string) =>
     scoped?.rates.find((r) => r.preset_id === preset && r.group_id === group);
-  const rateOf = (group: string) => {
+  const rateOf = (group: string, weightKg = 0) => {
     const r = rateRow(presetId, group);
-    return r ? ratePerKg(r) : 0;
+    return r ? rateKgFor(r, group, weightKg) : 0;
   };
 
   const editRate = (preset: string, g: { id: string; name: string }) => {
@@ -195,6 +204,9 @@ function ProductsAdmin() {
     });
   };
 
+  // Sprinkler pipe is priced per piece: raw × weight + production ₹ + margin ₹ (both flat).
+  const isSprinkler = card?.group.toUpperCase() === SPRINKLER_GROUP;
+  const sample = prods.data?.find((p) => p.category === "sprinkler" && p.weight_kg > 0);
   async function submitCard(e: React.FormEvent) {
     e.preventDefault();
     if (!card) return;
@@ -208,9 +220,9 @@ function ProductsAdmin() {
           raw_kg: n(card.raw),
           raw_kg_non_isi: card.rawNonIsi.trim() === "" ? null : n(card.rawNonIsi),
           production_kg: n(card.production),
-          transport_kg: n(card.transport),
+          transport_kg: isSprinkler ? 0 : n(card.transport),
           margin: n(card.margin),
-          margin_is_pct: card.pct,
+          margin_is_pct: isSprinkler ? false : card.pct,
         },
       });
       await qc.invalidateQueries({ queryKey: ["pricing"] });
@@ -509,11 +521,11 @@ function ProductsAdmin() {
         </div>
         <div className="flex items-baseline justify-between rounded-xl bg-secondary px-4 py-3 tabular-nums">
           <span className="text-sm text-muted-foreground">
-            {fmtNum(n(prod.weight), 3)} kg × {fmtMoney(rateOf(prod.rate_group_id ?? ""))}/kg (
-            {presetName(presetId)})
+            {fmtNum(n(prod.weight), 3)} kg ×{" "}
+            {fmtMoney(rateOf(prod.rate_group_id ?? "", n(prod.weight)))}/kg ({presetName(presetId)})
           </span>
           <span className="text-xl font-bold">
-            {fmtMoney(rateOf(prod.rate_group_id ?? "") * n(prod.weight))}
+            {fmtMoney(rateOf(prod.rate_group_id ?? "", n(prod.weight)) * n(prod.weight))}
             <span className="text-sm font-medium text-muted-foreground">
               /{UNIT_LABELS[(prod.unit ?? "pc") as Unit]}
             </span>
@@ -625,27 +637,7 @@ function ProductsAdmin() {
               await qc.invalidateQueries({ queryKey: ["products"] });
             }}
             onCreated={() => qc.invalidateQueries({ queryKey: ["products"] })}
-            onAddOther={(cat) =>
-              setProd(
-                cat === "sprinkler"
-                  ? {
-                      category: "sprinkler",
-                      rate_group_id: "SPRINKLER",
-                      unit: "pc",
-                      gst_rate: 5,
-                      hsn: "3917 21 90",
-                      weight: "",
-                    }
-                  : {
-                      category: "fitting",
-                      rate_group_id: "FITTING",
-                      unit: "pc",
-                      gst_rate: 18,
-                      hsn: "3917 40 00",
-                      weight: "",
-                    },
-              )
-            }
+            brands={brands.data ?? []}
           />
         )}
 
@@ -763,7 +755,7 @@ function ProductsAdmin() {
                     className={inputCls}
                   />
                 </Field>
-                <Field label="Production ₹/kg">
+                <Field label={`Production ₹/${isSprinkler ? "piece" : "kg"}`}>
                   <input
                     inputMode="decimal"
                     value={card.production}
@@ -772,16 +764,18 @@ function ProductsAdmin() {
                     className={inputCls}
                   />
                 </Field>
-                <Field label="Transport ₹/kg">
-                  <input
-                    inputMode="decimal"
-                    value={card.transport}
-                    onFocus={(e) => e.currentTarget.select()}
-                    onChange={(e) => setCard({ ...card, transport: e.target.value })}
-                    className={inputCls}
-                  />
-                </Field>
-                <Field label={`Profit margin ${card.pct ? "%" : "₹/kg"}`}>
+                {!isSprinkler && (
+                  <Field label="Transport ₹/kg">
+                    <input
+                      inputMode="decimal"
+                      value={card.transport}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => setCard({ ...card, transport: e.target.value })}
+                      className={inputCls}
+                    />
+                  </Field>
+                )}
+                <Field label={`Profit margin ${isSprinkler ? "₹/piece" : card.pct ? "%" : "₹/kg"}`}>
                   <input
                     inputMode="decimal"
                     value={card.margin}
@@ -791,33 +785,52 @@ function ProductsAdmin() {
                   />
                 </Field>
               </div>
-              <Chips
-                label="Margin type"
-                value={card.pct ? "pct" : "flat"}
-                onChange={(v) => setCard({ ...card, pct: v === "pct" })}
-                options={[
-                  { value: "pct", label: "Margin %" },
-                  { value: "flat", label: "Margin ₹/kg" },
-                ]}
-              />
-              <div className="flex items-baseline justify-between rounded-xl bg-secondary px-4 py-3">
-                <span className="text-sm text-muted-foreground">
-                  Cost{" "}
-                  {fmtMoney(
-                    costPerKg({
-                      raw_kg: n(card.raw),
-                      production_kg: n(card.production),
-                      transport_kg: n(card.transport),
-                    }),
-                  )}{" "}
-                  → sell
-                </span>
-                <span className="text-2xl font-bold tabular-nums">
-                  {fmtMoney(cardRate)}
-                  <span className="text-sm font-medium text-muted-foreground">/kg</span>
-                </span>
-              </div>
-              {card.rawNonIsi.trim() !== "" && (
+              {!isSprinkler && (
+                <Chips
+                  label="Margin type"
+                  value={card.pct ? "pct" : "flat"}
+                  onChange={(v) => setCard({ ...card, pct: v === "pct" })}
+                  options={[
+                    { value: "pct", label: "Margin %" },
+                    { value: "flat", label: "Margin ₹/kg" },
+                  ]}
+                />
+              )}
+              {isSprinkler ? (
+                <p className="rounded-xl bg-secondary px-4 py-3 text-sm text-muted-foreground tabular-nums">
+                  Price per piece = raw × piece weight + production + margin
+                  {sample && (
+                    <>
+                      <br />
+                      {sample.name} ({fmtNum(sample.weight_kg, 3)} kg) ={" "}
+                      <b className="text-foreground">
+                        {fmtMoney(
+                          n(card.raw) * sample.weight_kg + n(card.production) + n(card.margin),
+                        )}
+                      </b>
+                    </>
+                  )}
+                </p>
+              ) : (
+                <div className="flex items-baseline justify-between rounded-xl bg-secondary px-4 py-3">
+                  <span className="text-sm text-muted-foreground">
+                    Cost{" "}
+                    {fmtMoney(
+                      costPerKg({
+                        raw_kg: n(card.raw),
+                        production_kg: n(card.production),
+                        transport_kg: n(card.transport),
+                      }),
+                    )}{" "}
+                    → sell
+                  </span>
+                  <span className="text-2xl font-bold tabular-nums">
+                    {fmtMoney(cardRate)}
+                    <span className="text-sm font-medium text-muted-foreground">/kg</span>
+                  </span>
+                </div>
+              )}
+              {card.rawNonIsi.trim() !== "" && !isSprinkler && (
                 <p className="text-right text-sm tabular-nums text-muted-foreground">
                   Non-ISI sell{" "}
                   <b className="text-foreground">
@@ -1213,16 +1226,20 @@ function PricingGrid({
                             <span className="flex items-start justify-end gap-3">
                               <span>
                                 <span className="block text-base font-bold lg:text-sm">
-                                  {fmtMoney(ratePerKg(r))}
+                                  {g.id === SPRINKLER_GROUP
+                                    ? `+${fmtMoney(r.production_kg + r.margin)}/pc`
+                                    : fmtMoney(ratePerKg(r))}
                                 </span>
                                 <span
                                   className={`block text-[10px] ${r.brandApplied ? "font-semibold text-primary" : "text-muted-foreground"}`}
                                 >
-                                  {parts(r)}
+                                  {g.id === SPRINKLER_GROUP
+                                    ? `raw × wt + ${fmtNum(r.production_kg)} + ${fmtNum(r.margin)}`
+                                    : parts(r)}
                                   {r.brandApplied && " · brand raw"}
                                 </span>
                               </span>
-                              {r.raw_kg_non_isi != null && (
+                              {r.raw_kg_non_isi != null && g.id !== SPRINKLER_GROUP && (
                                 <>
                                   <span
                                     className="self-stretch border-l border-border"
@@ -1438,12 +1455,12 @@ function WeightChart({
   products,
   onSaveMany,
   onCreated,
-  onAddOther,
+  brands,
 }: {
   products: Product[];
   onSaveMany: (changes: { p: Product; weight: number }[]) => Promise<void>;
   onCreated: () => void;
-  onAddOther: (cat: "sprinkler" | "fitting") => void;
+  brands: { id: string; name: string }[];
 }) {
   const [editing, setEditing] = useState(false);
   // In-house = your factory weights (what quotes use). IS 4984 is the reference chart, read-only.
@@ -1646,7 +1663,7 @@ function WeightChart({
           <p className="text-sm text-muted-foreground">
             {basis === "inhouse"
               ? "kg per metre · your factory weights, used on quotes · amber = more than 5% from IS"
-              : "kg per metre · IS 4984:2016 reference weights (read-only)"}
+              : "kg per metre and wall thickness · IS 4984:2016 reference (read-only)"}
           </p>
         </div>
         {editing ? (
@@ -1922,6 +1939,11 @@ function WeightChart({
                               IS {fmtNum(ref, 3)}
                             </span>
                           )}
+                          {basis === "is" && isWall(p) && (
+                            <span className="block text-[10px] text-muted-foreground">
+                              {isWall(p)}
+                            </span>
+                          )}
                         </td>
                       );
                     })}
@@ -2049,33 +2071,248 @@ function WeightChart({
         ))}
       </div>
 
-      <Card title="Sprinkler · kg per piece">
-        <ul className="-my-1 divide-y divide-border/60">
-          {others.map((p) => (
-            <li key={p.id} className="flex items-center justify-between gap-3 py-2">
-              <span className="min-w-0 truncate font-medium">{p.name}</span>
-              {editing ? (
-                cellInput(p)
-              ) : (
-                <span className="font-semibold tabular-nums">
-                  {fmtNum(p.weight_kg, 3)} kg/{UNIT_LABELS[p.unit as Unit]}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+      <SprinklerCard items={others} brands={brands} onChanged={onCreated} />
+
+      {basis === "is" && <IsChart />}
+    </div>
+  );
+}
+
+// The full IS 4984:2016 chart: wall thickness (min–max, mm) and kg per metre for every OD and SDR.
+function IsChart() {
+  return (
+    <Card title="IS 4984:2016 · wall thickness (mm) and weight (kg/m) by SDR">
+      <div className="-mx-4 overflow-x-auto px-4">
+        <table className="w-full min-w-[56rem] border-separate border-spacing-0 text-right tabular-nums">
+          <thead className="text-xs text-muted-foreground">
+            <tr>
+              <th className="sticky left-0 bg-card py-1 pr-3 text-left font-semibold">OD mm</th>
+              {IS_SDRS.map((sdr) => (
+                <th key={sdr} className="px-2 py-1 font-semibold">
+                  SDR {sdr}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {IS_ODS.map((od) => (
+              <tr key={od} className="border-t border-border/60">
+                <td className="sticky left-0 border-t border-border/60 bg-card py-1 pr-3 text-left text-sm font-semibold">
+                  {od}
+                </td>
+                {IS_SDRS.map((sdr) => {
+                  const t = isSpec(od, sdr);
+                  return (
+                    <td key={sdr} className="border-t border-border/60 px-2 py-1">
+                      {t ? (
+                        <>
+                          <span className="block text-sm font-semibold">{fmtNum(t.kgPerM, 3)}</span>
+                          <span className="block text-[10px] text-muted-foreground">
+                            {fmtNum(t.min, 1)}–{fmtNum(t.max, 1)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">·</span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        PE63 / PE80 / PE100 pick their SDR from the pressure class (PN). Quotes print the min–max
+        wall from this chart.
+      </p>
+    </Card>
+  );
+}
+
+// Sprinkler pipe: one row per brand × size × length with its own weight (a brand's 6 m pipe may be 3.2 kg,
+// another's 2.8 kg). Price per piece = the brand's raw ₹/kg × weight + production + margin (Pricing).
+function SprinklerCard({
+  items,
+  brands,
+  onChanged,
+}: {
+  items: Product[];
+  brands: { id: string; name: string }[];
+  onChanged: () => void;
+}) {
+  const [form, setForm] = useState<null | {
+    id?: string;
+    brand: string;
+    size: string;
+    len: string;
+    weight: string;
+  }>(null);
+  const [busy, setBusy] = useState(false);
+  const brandName = (id: string | null) => brands.find((b) => b.id === id)?.name ?? "All brands";
+  const sorted = [...items].sort(
+    (a, b) =>
+      brandName(a.brand_id).localeCompare(brandName(b.brand_id)) ||
+      (a.size_mm ?? 0) - (b.size_mm ?? 0) ||
+      (a.length_m ?? 0) - (b.length_m ?? 0),
+  );
+
+  async function save() {
+    if (!form) return;
+    const size = Number(form.size);
+    const len = Number(form.len);
+    const weight = Number(form.weight);
+    if (!(size > 0) || !(len > 0) || !(weight > 0))
+      return void toast.error("Enter size, length and weight");
+    const old = items.find((p) => p.id === form.id);
+    setBusy(true);
+    try {
+      await saveProduct({
+        data: {
+          ...(form.id ? { id: form.id } : {}),
+          category: "sprinkler",
+          rate_group_id: SPRINKLER_GROUP,
+          name: `Sprinkler Pipe ${size} mm × ${len} m`,
+          size_mm: Math.round(size),
+          length_m: len,
+          brand_id: form.brand || null,
+          unit: "pc",
+          weight_kg: weight,
+          gst_rate: old?.gst_rate ?? 5,
+          hsn: old?.hsn ?? "3917 21 90",
+          active: true,
+        },
+      });
+      onChanged();
+      setForm(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message.slice(0, 140) : "Could not save");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove(p: Product) {
+    if (!confirm(`Delete ${brandName(p.brand_id)} ${p.name}?`)) return;
+    setBusy(true);
+    try {
+      await removeProducts({ data: { ids: [p.id] } });
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Sprinkler · kg per piece">
+      <ul className="-my-1 divide-y divide-border/60">
+        {sorted.map((p) => (
+          <li key={p.id} className="flex items-center justify-between gap-3 py-2">
+            <span className="min-w-0 truncate">
+              <span className="font-medium">{brandName(p.brand_id)}</span>{" "}
+              <span className="text-muted-foreground">
+                {p.size_mm} mm · {p.length_m ?? "?"} m
+              </span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="font-semibold tabular-nums">{fmtNum(p.weight_kg, 3)} kg/pc</span>
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-sm font-medium text-primary hover:bg-secondary"
+                onClick={() =>
+                  setForm({
+                    id: p.id,
+                    brand: p.brand_id ?? "",
+                    size: String(p.size_mm ?? ""),
+                    len: String(p.length_m ?? ""),
+                    weight: String(p.weight_kg),
+                  })
+                }
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`Delete ${p.name}`}
+                className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-destructive"
+                onClick={() => remove(p)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {form ? (
+        <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-3">
+          <p className="text-sm font-semibold">
+            {form.id ? "Edit sprinkler pipe" : "New sprinkler pipe"}
+          </p>
+          <Field label="Brand">
+            <Chips
+              label="Brand"
+              value={form.brand}
+              onChange={(v) => setForm({ ...form, brand: v })}
+              options={[
+                { value: "", label: "All brands" },
+                ...brands.map((b) => ({ value: b.id, label: b.name })),
+              ]}
+            />
+          </Field>
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Size (mm)">
+              <input
+                inputMode="numeric"
+                value={form.size}
+                onChange={(e) => setForm({ ...form, size: e.target.value })}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Length (m)">
+              <input
+                inputMode="decimal"
+                value={form.len}
+                list="sprinkler-lengths"
+                onChange={(e) => setForm({ ...form, len: e.target.value })}
+                className={inputCls}
+              />
+              <datalist id="sprinkler-lengths">
+                <option value="6" />
+                <option value="12" />
+              </datalist>
+            </Field>
+            <Field label="Weight (kg)">
+              <input
+                inputMode="decimal"
+                value={form.weight}
+                onChange={(e) => setForm({ ...form, weight: e.target.value })}
+                className={inputCls}
+              />
+            </Field>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" className="h-10 rounded-xl" onClick={() => setForm(null)}>
+              Cancel
+            </Button>
+            <Button className="h-10 rounded-xl" disabled={busy} onClick={save}>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      ) : (
         <Button
           variant="outline"
           className="h-11 rounded-xl"
-          onClick={() => onAddOther("sprinkler")}
+          onClick={() => setForm({ brand: brands[0]?.id ?? "", size: "", len: "6", weight: "" })}
         >
           <Plus className="mr-1 h-4 w-4" /> Sprinkler size
         </Button>
-        <p className="text-xs text-muted-foreground">
-          Fittings have no weight: add or delete them under Products → Fitting.
-        </p>
-      </Card>
-    </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Fittings have no weight or rate card: add or delete them under Products → Fitting and type
+        the price on the quote.
+      </p>
+    </Card>
   );
 }
 
@@ -2099,7 +2336,7 @@ function ProductList({
   pricing: Pricing | undefined;
   presetId: string;
   onPreset: (id: string) => void;
-  rateOf: (group: string) => number;
+  rateOf: (group: string, weightKg?: number) => number;
   onSaveWeight: (p: Product, v: string) => Promise<void>;
   onEdit: (p: Product) => void;
   onAdd: () => void;
@@ -2408,7 +2645,7 @@ function ProductList({
           >
             <ul className="-my-1 divide-y divide-border/60">
               {items.map((p) => {
-                const rate = rateOf(p.rate_group_id);
+                const rate = rateOf(p.rate_group_id, p.weight_kg);
                 const up = rate * p.weight_kg;
                 return (
                   <li key={p.id} className="flex items-center gap-3 py-2">
@@ -2551,7 +2788,7 @@ function ProductList({
                                   (x) => x.preset_id === pr.id && x.group_id === p.rate_group_id,
                                 );
                                 const up = r
-                                  ? ratePerKg(r) *
+                                  ? rateKgFor(r, p.rate_group_id, p.weight_kg) *
                                     p.weight_kg *
                                     (withGst ? 1 + p.gst_rate / 100 : 1)
                                   : 0;
@@ -2818,13 +3055,13 @@ function ProductMatrix({
   onPick,
 }: {
   products: Product[];
-  rateOf: (group: string) => number;
+  rateOf: (group: string, weightKg?: number) => number;
   withGst: boolean;
   selectedId: string;
   onPick: (p: Product) => void;
 }) {
   const price = (p: Product) =>
-    rateOf(p.rate_group_id) * p.weight_kg * (withGst ? 1 + p.gst_rate / 100 : 1);
+    rateOf(p.rate_group_id, p.weight_kg) * p.weight_kg * (withGst ? 1 + p.gst_rate / 100 : 1);
   const pipes = products.filter((p) => p.category === "pipe");
   const others = products.filter((p) => p.category !== "pipe");
   const tables = [...new Set(pipes.map((p) => `${p.grade ?? ""}|${p.roll ?? "complete"}`))].map(
@@ -2968,7 +3205,7 @@ function PresetPreview({
             const r = pricing.rates.find(
               (x) => x.preset_id === pr.id && x.group_id === product.rate_group_id,
             );
-            const kg = r ? ratePerKg(r) : 0;
+            const kg = r ? rateKgFor(r, product.rate_group_id ?? "", w) : 0;
             return (
               <tr key={pr.id} className="border-t border-border/60">
                 <td className="px-3 py-1.5 font-medium">{pr.name}</td>

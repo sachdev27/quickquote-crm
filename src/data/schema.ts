@@ -90,6 +90,8 @@ export const products = sqliteTable("products", {
   weight_kg: real("weight_kg").notNull().default(0),
   gst_rate: real("gst_rate").notNull().default(18),
   hsn: text("hsn"),
+  brand_id: text("brand_id"), // sprinkler pipe only: its weight is that brand's
+  length_m: real("length_m"), // sprinkler pipe only: 6 or 12 m
   sort: integer("sort").notNull().default(0),
   active: integer("active").notNull().default(1),
 });

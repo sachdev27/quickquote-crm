@@ -1,6 +1,8 @@
+import { isSpec } from "./is4984";
+
 // HDPE pipe weight from IS 4984:2016. PN = 0.8 · 20σ / (SDR − 1), σ = design stress per grade (MPa),
-// so each grade + PN maps to an SDR. Wall = OD/SDR rounded up to 0.1 mm (min 2 mm); kg/m = π·(OD−e)·e·ρ.
-// ponytail: approximates the standard's tables (±~2%); weights stay editable per product.
+// so each grade + PN maps to an SDR. Wall and kg/m come from the standard's chart (is4984.ts); sizes
+// off the chart fall back to wall = OD/SDR rounded up to 0.1 mm (min 2 mm), kg/m = π·(OD−e)·e·ρ.
 export const PE_DENSITY = 0.95;
 
 const SIGMA: Record<string, number> = { PE63: 5, PE80: 6.3, PE100: 8 };
@@ -15,9 +17,11 @@ export function sdrFor(grade: string, pn: number): number | null {
 
 // Minimum wall (mm) for an OD and SDR, as IS 4984 rounds it.
 export const wallFor = (od: number, sdr: number) =>
-  Math.max(2, Math.ceil((od / sdr) * 10 - 1e-9) / 10);
+  isSpec(od, sdr)?.min ?? Math.max(2, Math.ceil((od / sdr) * 10 - 1e-9) / 10);
 
 export function pipeKgPerM(od: number, sdr: number): number {
+  const t = isSpec(od, sdr);
+  if (t) return t.kgPerM;
   const e = wallFor(od, sdr);
   return (Math.PI * (od - e) * e * PE_DENSITY) / 1000;
 }

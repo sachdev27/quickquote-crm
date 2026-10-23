@@ -217,7 +217,7 @@ export function QuoteDocument({
                             {specs[i] && <PipeSection spec={specs[i]!} />}
                             <div className="min-w-0">
                               <p className="font-medium text-[var(--qd-ink)]">{l.description}</p>
-                              <SpecLine spec={specs[i]} line={l} />
+                              <SpecLine spec={specs[i]} />
                             </div>
                           </div>
                         </Td>
@@ -395,7 +395,7 @@ export function QuoteDocument({
                     <span>
                       Rates per unit, excluding GST.
                       {hasPipes &&
-                        " OD = outside diameter, ID = inside diameter, Thickness = minimum wall, SDR = OD ÷ thickness (IS 4984); drawings not to scale."}{" "}
+                        " OD = outside diameter, ID = inside diameter (OD − 2 × minimum wall), Thickness = minimum–maximum wall, SDR = OD ÷ thickness (IS 4984); drawings not to scale."}{" "}
                       {isInv
                         ? "Computer-generated tax invoice."
                         : "Computer-generated proforma, not a tax invoice; prices subject to confirmation on order."}
@@ -418,18 +418,9 @@ export function QuoteDocument({
 }
 
 // Quiet lines under the description. OD / ID / thickness are written on the drawing itself.
-function SpecLine({ spec, line: l }: { spec: PipeSpec | null | undefined; line: Line }) {
-  const weight =
-    l.weightKg > 0 &&
-    `${fmtNum(l.weightKg, 3)} kg/${UNIT_LABELS[l.unit]} · ${fmtNum(lineWeight(l))} kg @ ₹${fmtAmt(l.rateKg)}/kg`;
+function SpecLine({ spec }: { spec: PipeSpec | null | undefined }) {
   const sdr = spec?.sdr ? `SDR ${fmtNum(spec.sdr, 1)}` : "";
-  if (!sdr && !weight) return null;
-  return (
-    <>
-      {sdr && <p className="text-[7.5pt] text-[var(--qd-accent)]">{sdr}</p>}
-      {weight && <p className="text-[7.5pt] text-[var(--qd-muted)]">{weight}</p>}
-    </>
-  );
+  return sdr ? <p className="text-[7.5pt] text-[var(--qd-accent)]">{sdr}</p> : null;
 }
 
 const Th = ({ children, className = "" }: { children?: ReactNode; className?: string }) => (
