@@ -5,6 +5,7 @@ import { pipeSpec } from "@/lib/pipe-spec";
 import { stateOf, validUntil } from "@/lib/quote-doc";
 import { parseRoll, withRolls } from "@/lib/rolls";
 import { describeChanges, type AuditSnap } from "@/lib/audit";
+import { ageLabel, daysSince, hueOf, initialsOf, staleness } from "@/lib/board";
 
 describe("rate formula", () => {
   it("₹/kg = (raw + production + transport) × (1 + margin%)", () => {
@@ -183,5 +184,27 @@ describe("audit summary", () => {
   it("notes added and removed items", () => {
     expect(describeChanges(snap(), snap({ lines: [line, line] }))).toContain("Added");
     expect(describeChanges(snap({ lines: [line, line] }), snap())).toContain("Removed");
+  });
+});
+
+describe("board helpers", () => {
+  const now = Date.parse("2026-10-23T12:00:00Z");
+  it("ages a card in whole days", () => {
+    expect(daysSince("2026-10-23T01:00:00Z", now)).toBe(0);
+    expect(daysSince("2026-10-20T12:00:00Z", now)).toBe(3);
+    expect(daysSince("2026-10-25", now)).toBe(0); // future dates never go negative
+    expect(daysSince(null, now)).toBe(0);
+    expect(ageLabel(0)).toBe("today");
+    expect(ageLabel(12)).toBe("12d");
+  });
+  it("flags slow and stale deals", () => {
+    expect([3, 7, 14].map(staleness)).toEqual(["fresh", "slow", "stale"]);
+  });
+  it("makes initials and a stable hue", () => {
+    expect(initialsOf("Shree Ganesh Agro")).toBe("SG");
+    expect(initialsOf("Ramesh")).toBe("RA");
+    expect(initialsOf(null)).toBe("?");
+    expect(hueOf("Ramesh")).toBe(hueOf("Ramesh"));
+    expect(hueOf("Ramesh")).toBeLessThan(360);
   });
 });

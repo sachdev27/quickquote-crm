@@ -1,12 +1,22 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, CalendarClock, ExternalLink, Phone, Plus } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  Columns3,
+  ExternalLink,
+  List,
+  Phone,
+  Plus,
+} from "lucide-react";
 import { toast } from "sonner";
 import { recall, remember } from "@/lib/utils";
 import { PageShell } from "@/components/bottom-nav";
 import { Chips, StatusPill, inputCls } from "@/components/qq";
-import { STAGES, STATUS_LABELS, fmtMoney, type Stage } from "@/lib/quote";
+import { KanbanBoard } from "@/components/kanban-board";
+import { STATUS_LABELS, fmtMoney, type Stage } from "@/lib/quote";
 import {
   getQuote,
   listEnquiries,
@@ -37,7 +47,7 @@ function Dashboard() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   const [view, setViewState] = useState<"list" | "pipeline">(
-    () => search.view ?? (recall("tarko.quotesView") === "pipeline" ? "pipeline" : "list"),
+    () => search.view ?? (recall("tarko.quotesView") === "list" ? "list" : "pipeline"),
   );
   const enqs = useQuery({
     queryKey: ["enquiries"],
@@ -57,6 +67,12 @@ function Dashboard() {
     await setEnquiryStatus({ data: { id, status: "lost" } });
     qc.invalidateQueries({ queryKey: ["enquiries"] });
     toast.success("Enquiry marked lost");
+  };
+  // Follow-ups and brand insights are collapsed by default so the board stays in view.
+  const [insightsOpen, setInsightsOpen] = useState(() => recall("tarko.insights") === "open");
+  const toggleInsights = () => {
+    remember("tarko.insights", insightsOpen ? "closed" : "open");
+    setInsightsOpen(!insightsOpen);
   };
   const setView = (v: "list" | "pipeline") => {
     setViewState(v);
@@ -133,8 +149,26 @@ function Dashboard() {
       </div>
 
       {(due.length > 0 || byBrand.length > 0) && (
-        <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <div className="rounded-2xl border border-border bg-card p-4">
+        <button
+          type="button"
+          onClick={toggleInsights}
+          aria-expanded={insightsOpen}
+          className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground"
+        >
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${insightsOpen ? "" : "-rotate-90"}`}
+          />
+          Follow-ups &amp; brand insights
+          {due.length > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+              {due.length} due
+            </span>
+          )}
+        </button>
+      )}
+      {insightsOpen && (due.length > 0 || byBrand.length > 0) && (
+        <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <div className="min-w-0 rounded-2xl border border-border bg-card p-4">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Today's follow-ups
             </p>
@@ -181,7 +215,7 @@ function Dashboard() {
             </ul>
           </div>
           {byBrand.length > 0 && (
-            <div className="rounded-2xl border border-border bg-card p-4">
+            <div className="min-w-0 rounded-2xl border border-border bg-card p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Won this month by brand
               </p>
@@ -207,15 +241,33 @@ function Dashboard() {
       )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Chips
-          label="View"
-          value={view}
-          onChange={setView}
-          options={[
-            { value: "list" as const, label: "List" },
-            { value: "pipeline" as const, label: "Pipeline" },
-          ]}
-        />
+        <div
+          role="radiogroup"
+          aria-label="View"
+          className="inline-flex h-12 shrink-0 rounded-xl border border-border bg-card p-1 lg:h-10"
+        >
+          {(
+            [
+              ["pipeline", "Board", Columns3],
+              ["list", "List", List],
+            ] as const
+          ).map(([v, label, Icon]) => (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={view === v}
+              onClick={() => setView(v)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 text-sm font-semibold transition-colors ${
+                view === v
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon className="h-4 w-4" /> {label}
+            </button>
+          ))}
+        </div>
         <input
           placeholder="Search quote, customer or brand"
           value={q}
@@ -260,7 +312,7 @@ function Dashboard() {
       )}
 
       {view === "pipeline" ? (
-        <Pipeline
+        <KanbanBoard
           rows={rows}
           enquiries={(enqs.data ?? []).filter((x) =>
             `${x.e.title} ${x.customer ?? ""}`.toLowerCase().includes(q.toLowerCase()),
@@ -311,220 +363,7 @@ function Dashboard() {
   );
 }
 
-type FollowUp = Awaited<ReturnType<typeof listFollowUps>>[number];
-
-// Deal board. Desktop: drag a card to another column. Phone: stage tabs + "Move to" on each card.
 type Enq = Awaited<ReturnType<typeof listEnquiries>>[number];
-type Col = "enquiry" | Stage;
-const COLS: Col[] = ["enquiry", ...STAGES];
-const COL_LABEL = (c: Col) => (c === "enquiry" ? "Enquiry" : STATUS_LABELS[c]!);
-
-// Deal board. Enquiry column first (deals before a quote). Desktop: drag between columns
-// (enquiry → a quote stage starts a quote from it). Phone: stage tabs + a move menu per card.
-function Pipeline({
-  rows,
-  enquiries,
-  followUps,
-  onMove,
-  onOpenEnquiry,
-  onNewEnquiry,
-  onConvert,
-  onEnquiryLost,
-}: {
-  rows: QRow[];
-  enquiries: Enq[];
-  followUps: FollowUp[];
-  onMove: (id: string, s: Stage) => void;
-  onOpenEnquiry: (e: Enq) => void;
-  onNewEnquiry: () => void;
-  onConvert: (id: string) => void;
-  onEnquiryLost: (id: string) => void;
-}) {
-  const [mobileStage, setMobileStage] = useState<Col>("enquiry");
-  const [over, setOver] = useState<Col | null>(null);
-  const nextFollow = (pick: (f: FollowUp) => boolean) => followUps.find(pick)?.a.due_date;
-  const today = new Date().toISOString().slice(0, 10);
-  const openEnq = enquiries.filter((e) => e.e.status === "open");
-  const col = (s: Stage) => rows.filter((r) => r.status === s);
-  const colValue = (c: Col) =>
-    c === "enquiry"
-      ? openEnq.reduce((t, e) => t + e.e.expected_value, 0)
-      : col(c).reduce((t, r) => t + r.total, 0);
-  const colCount = (c: Col) => (c === "enquiry" ? openEnq.length : col(c).length);
-  const COLORS: Record<Col, string> = {
-    enquiry: "border-t-violet-500",
-    draft: "border-t-slate-400",
-    sent: "border-t-sky-500",
-    negotiation: "border-t-amber-500",
-    won: "border-t-emerald-600",
-    lost: "border-t-rose-500",
-  };
-  const badge = (fu?: string | null) =>
-    fu ? (
-      <span
-        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${fu < today ? "bg-rose-100 text-rose-800" : fu === today ? "bg-amber-100 text-amber-800" : "bg-secondary text-muted-foreground"}`}
-      >
-        <CalendarClock className="h-3 w-3" /> {fu.slice(5)}
-      </span>
-    ) : null;
-
-  const quoteCard = (r: QRow, mobile = false) => (
-    <div
-      key={r.id}
-      draggable={!mobile}
-      onDragStart={(e) => e.dataTransfer.setData("text/plain", `q:${r.id}`)}
-      className="cursor-grab rounded-xl border border-border bg-card p-3 shadow-sm active:cursor-grabbing"
-    >
-      <Link to="/quotes/$id" params={{ id: r.id }} className="block">
-        <p className="truncate text-sm font-semibold">{r.customer_name ?? "Walk-in"}</p>
-        <p className="text-xs text-muted-foreground">
-          {r.quote_no} · {r.brand_name}
-        </p>
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-base font-bold tabular-nums">{fmtMoney(r.total)}</span>
-          {badge(nextFollow((f) => f.a.quote_id === r.id))}
-        </div>
-      </Link>
-      {mobile && (
-        <select
-          aria-label="Move to stage"
-          value={r.status}
-          onChange={(e) => onMove(r.id, e.target.value as Stage)}
-          className="mt-2 h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
-        >
-          {STAGES.map((s) => (
-            <option key={s} value={s}>
-              Move to: {STATUS_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      )}
-    </div>
-  );
-
-  const enquiryCard = (en: Enq, mobile = false) => (
-    <div
-      key={en.e.id}
-      draggable={!mobile}
-      onDragStart={(e) => e.dataTransfer.setData("text/plain", `e:${en.e.id}`)}
-      className="cursor-grab rounded-xl border border-violet-200 bg-card p-3 shadow-sm active:cursor-grabbing"
-    >
-      <button type="button" onClick={() => onOpenEnquiry(en)} className="block w-full text-left">
-        <p className="truncate text-sm font-semibold">{en.customer ?? "New customer"}</p>
-        <p className="line-clamp-2 text-xs text-muted-foreground">{en.e.title}</p>
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-base font-bold tabular-nums">
-            {en.e.expected_value ? fmtMoney(en.e.expected_value) : "—"}
-          </span>
-          {badge(nextFollow((f) => f.a.enquiry_id === en.e.id))}
-        </div>
-      </button>
-      {mobile && (
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <Button
-            variant="outline"
-            className="h-9 rounded-lg text-xs"
-            onClick={() => onConvert(en.e.id)}
-          >
-            Create quote
-          </Button>
-          <Button
-            variant="ghost"
-            className="h-9 rounded-lg text-xs"
-            onClick={() => onEnquiryLost(en.e.id)}
-          >
-            Mark lost
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-
-  const drop = (c: Col, payload: string) => {
-    const [kind, id] = payload.split(":") as ["q" | "e", string];
-    if (!id) return;
-    if (kind === "q") {
-      if (c === "enquiry") return void toast.message("Quotes can't go back to Enquiry.");
-      onMove(id, c);
-    } else if (c === "lost") onEnquiryLost(id);
-    else if (c !== "enquiry") onConvert(id);
-  };
-
-  return (
-    <>
-      {/* phone */}
-      <div className="space-y-3 lg:hidden">
-        <Chips<Col>
-          label="Stage"
-          value={mobileStage}
-          onChange={setMobileStage}
-          options={COLS.map((c) => ({
-            value: c,
-            label: COL_LABEL(c),
-            sub: `${colCount(c)} · ${fmtMoney(colValue(c))}`,
-          }))}
-        />
-        {mobileStage === "enquiry" && (
-          <Button
-            variant="outline"
-            className="h-11 w-full rounded-xl border-dashed"
-            onClick={onNewEnquiry}
-          >
-            <Plus className="mr-1 h-4 w-4" /> New enquiry
-          </Button>
-        )}
-        {colCount(mobileStage) === 0 && (
-          <p className="py-6 text-center text-sm text-muted-foreground">No deals in this stage.</p>
-        )}
-        {mobileStage === "enquiry"
-          ? openEnq.map((e) => enquiryCard(e, true))
-          : col(mobileStage).map((r) => quoteCard(r, true))}
-      </div>
-      {/* desktop */}
-      <div className="hidden gap-3 lg:grid lg:grid-cols-6">
-        {COLS.map((c) => (
-          <div
-            key={c}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setOver(c);
-            }}
-            onDragLeave={() => setOver(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setOver(null);
-              drop(c, e.dataTransfer.getData("text/plain"));
-            }}
-            className={`flex min-h-[60vh] flex-col rounded-2xl border border-t-4 border-border bg-secondary/40 ${COLORS[c]} ${over === c ? "ring-2 ring-primary" : ""}`}
-          >
-            <div className="flex items-start justify-between gap-1 px-3 pt-3">
-              <div>
-                <p className="text-sm font-semibold">{COL_LABEL(c)}</p>
-                <p className="text-xs tabular-nums text-muted-foreground">
-                  {fmtMoney(colValue(c))} · {colCount(c)}
-                </p>
-              </div>
-              {c === "enquiry" && (
-                <button
-                  type="button"
-                  onClick={onNewEnquiry}
-                  className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-xs font-semibold text-primary hover:bg-primary/10"
-                >
-                  <Plus className="h-3.5 w-3.5" /> Deal
-                </button>
-              )}
-            </div>
-            <div className="flex-1 space-y-2 overflow-y-auto p-2">
-              {c === "enquiry"
-                ? openEnq.map((e) => enquiryCard(e))
-                : col(c).map((r) => quoteCard(r))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
 
 type QRow = Awaited<ReturnType<typeof listQuotes>>[number];
 type SortKey = "quote_no" | "quote_date" | "customer_name" | "brand_name" | "total" | "status";
