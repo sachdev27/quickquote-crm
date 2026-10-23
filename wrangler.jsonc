@@ -13,5 +13,8 @@
     },
   ],
   // Cloudflare Zero Trust > Access > Applications: protect this hostname, then fill these in.
-  "vars": { "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" },
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "tarkoindia.cloudflareaccess.com",
+    "ACCESS_AUD": "5aba95623b2234798347421438bbee3433825a62ebefb336ea5c2e5e27d24843"
+  },
 }
