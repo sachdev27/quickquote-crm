@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { useEffect, useState } from "react";
 import { fmtNum } from "@/lib/quote";
 import { PE_DENSITY } from "@/lib/weights";
 
@@ -27,6 +28,11 @@ export function WeightExplainer({
   const [step, setStep] = useState(0);
   const [t, setT] = useState(0.5); // 0 = minimum wall, 1 = maximum wall
   const [metres, setMetres] = useState("100");
+  // a different pipe starts the walkthrough again (the drawer itself stays as the user left it)
+  useEffect(() => {
+    setStep(0);
+    setT(0.5);
+  }, [od, sdr, min, max]);
   const wall = min + (max - min) * t;
   const stripLen = Math.PI * (od - wall); // length of the ring if cut open at its middle
   const area = stripLen * wall; // mm²
@@ -42,15 +48,18 @@ export function WeightExplainer({
   const ring = Math.max(5, (wall / od) * 2 * R);
 
   return (
-    <div className="rounded-2xl border border-border p-4 text-sm">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <p className="font-semibold">How is the weight worked out?</p>
-        <p className="text-xs text-muted-foreground">
-          {sample ? "Example: " : "Your selection: "}
-          <b className="text-foreground">{title}</b>
-          {sample && " · click any cell in the chart to try another size"}
-        </p>
-      </div>
+    <details className="group rounded-2xl border border-border p-4 text-sm">
+      <summary className="mb-3 flex cursor-pointer list-none items-center justify-between gap-3 font-semibold [&::-webkit-details-marker]:hidden">
+        <span>
+          How is the weight worked out?
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {sample ? "Example: " : "Your selection: "}
+            {title}
+            {sample && " · click any cell in the chart to try another size"}
+          </span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+      </summary>
 
       <ol className="mb-4 flex gap-1" aria-label="Steps">
         {STEPS.map((s, i) => (
@@ -344,6 +353,6 @@ export function WeightExplainer({
           {step === STEPS.length - 1 ? "Start again" : "Next →"}
         </button>
       </div>
-    </div>
+    </details>
   );
 }

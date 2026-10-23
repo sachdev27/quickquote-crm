@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Calculator,
   Check,
+  ChevronDown,
   Copy,
   Download,
   Plus,
@@ -2152,6 +2153,34 @@ function WeightChart({
 }
 
 // The full IS 4984:2016 chart: wall thickness (min–max, mm) and kg per metre for every OD and SDR.
+// A section that folds away like a drawer.
+function Fold({
+  title,
+  hint,
+  className,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  className: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details open={defaultOpen} className={`group ${className}`}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+        <span>
+          {title}
+          {hint && <span className="ml-2 text-xs font-normal text-muted-foreground">{hint}</span>}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="mt-3 space-y-3">{children}</div>
+    </details>
+  );
+}
+
 function IsChart() {
   // Pick any of PE grade, PN and OD: the matching columns, rows and cells light up, the rest fade.
   const [grade, setGrade] = useState("");
@@ -2215,7 +2244,11 @@ function IsChart() {
   return (
     <Card title="IS 4984:2016 · wall thickness (mm) and weight (kg/m) by SDR">
       <div className="space-y-5 pt-1">
-        <div className="space-y-3 rounded-2xl bg-secondary/60 p-4">
+        <Fold
+          title="Edition and source"
+          hint={IS_EDITIONS[edition].label}
+          className="rounded-2xl bg-secondary/60 p-4"
+        >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <Chips
               label="Edition"
@@ -2252,8 +2285,28 @@ function IsChart() {
             Showing: <b className="text-foreground">{IS_EDITIONS[edition].label}</b>.{" "}
             {IS_EDITIONS[edition].note}
           </p>
-        </div>
-        <div className="space-y-3 rounded-2xl border border-border p-4">
+        </Fold>
+        {explain && (
+          <WeightExplainer
+            od={explain.od}
+            sdr={explain.sdr}
+            min={explain.spec.min}
+            max={explain.spec.max}
+            grades={grades.map((g) => ({
+              grade: g,
+              pn: IS_PN[g]![IS_SDRS.indexOf(explain.sdr)] ?? null,
+            }))}
+            grade={grade || undefined}
+            chartKg={explain.spec.kgPerM}
+            sample={explain.sample}
+          />
+        )}
+        <Fold
+          title="Find a size"
+          hint={[grade, pn && `PN ${pn}`, od && `${od} mm`].filter(Boolean).join(" · ") || "any"}
+          className="rounded-2xl border border-border p-4"
+          defaultOpen
+        >
           <div className="grid gap-4 md:grid-cols-[auto_1fr_8rem] md:items-end">
             <Field label="PE grade">
               <Chips
@@ -2337,23 +2390,7 @@ function IsChart() {
               {fmtNum(Number(od) - 2 * chosen.min, 1)} mm
             </p>
           )}
-        </div>
-        {explain && (
-          <WeightExplainer
-            key={`${explain.od}-${explain.sdr}-${edition}`}
-            od={explain.od}
-            sdr={explain.sdr}
-            min={explain.spec.min}
-            max={explain.spec.max}
-            grades={grades.map((g) => ({
-              grade: g,
-              pn: IS_PN[g]![IS_SDRS.indexOf(explain.sdr)] ?? null,
-            }))}
-            grade={grade || undefined}
-            chartKg={explain.spec.kgPerM}
-            sample={explain.sample}
-          />
-        )}
+        </Fold>
         <div className="-mx-4 overflow-x-auto px-4">
           <table className="w-full min-w-[56rem] border-separate border-spacing-0 text-right tabular-nums">
             <thead className="text-xs text-muted-foreground">
