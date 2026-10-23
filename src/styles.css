@@ -136,43 +136,73 @@
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
-.quote-doc thead {
+.quote-doc thead:not(.qd-pad) {
   display: table-header-group;
 }
 
-/* Print: only the quotation shows, as A4 with page numbers in the bottom margin */
+/* Print: only the quotation shows, as A4. Page margin is 0 so Chrome has no room for its own header and
+   footer text (date, title, URL); the real margins are padding on the sheet and the .qd-pad spacer rows. */
 @page {
   size: A4;
-  margin: 10mm 14mm 12mm;
-  @bottom-right {
-    content: "Page " counter(page) " of " counter(pages);
-    font-family: "IBM Plex Sans", Arial, sans-serif;
-    font-size: 7pt;
-    color: #6b7280;
-  }
+  margin: 0;
+}
+.qd-frame {
+  width: 100%;
+  border-collapse: collapse;
+}
+.qd-frame > tbody > tr > td {
+  padding: 0;
+  vertical-align: top;
+}
+.qd-pad {
+  display: none;
 }
 @media print {
   .no-print {
     display: none !important;
   }
+  /* Everything that wraps the sheet becomes a plain full-width block: on a 182 mm print area the app's
+     "phone" max-width rules would otherwise squeeze the quotation to ~60% of the page. */
+  html,
   body,
+  :has(> .print-sheet),
   :has(.print-sheet) {
-    background: white !important;
-  }
-  /* The app shell around the sheet must not add space: the @page margins are the only margins. */
-  :has(.print-sheet) {
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
     margin: 0 !important;
     padding: 0 !important;
-    min-height: 0 !important;
     gap: 0 !important;
+    overflow: visible !important;
+    background: white !important;
   }
   .a4-zoom {
     zoom: 1 !important;
   }
   .quote-doc {
-    width: auto;
+    width: 100%;
     min-height: 0;
-    padding: 0;
-    box-shadow: none;
+    padding: 0 14mm;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    font-size: 11.5px !important;
+  }
+  .qd-pad {
+    display: table-header-group;
+  }
+  tfoot.qd-pad {
+    display: table-footer-group;
+  }
+  .qd-pad-top {
+    height: 10mm;
+  }
+  .qd-pad-bottom {
+    height: 12mm;
+  }
+  .print-sheet {
+    box-shadow: none !important;
+    border: none !important;
   }
 }

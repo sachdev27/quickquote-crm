@@ -10,6 +10,8 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/s
 import { Switch } from "@/components/ui/switch";
 import {
   createQuote,
+  getQuote,
+  updateQuote,
   listBrands,
   listCustomers,
   listPricing,
@@ -38,19 +40,24 @@ import {
   type Unit,
 } from "@/lib/quote";
 import { recall, remember } from "@/lib/utils";
+import { parseRoll, withRolls } from "@/lib/rolls";
 import { useIsDesktop } from "@/hooks/use-mobile";
 import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
 
 export const Route = createFileRoute("/_authenticated/new-quote")({
-  validateSearch: (s: Record<string, unknown>): { enquiry?: string } =>
-    typeof s["enquiry"] === "string" ? { enquiry: s["enquiry"] } : {},
+  validateSearch: (s: Record<string, unknown>): { enquiry?: string; edit?: string } => ({
+    ...(typeof s["enquiry"] === "string" ? { enquiry: s["enquiry"] } : {}),
+    ...(typeof s["edit"] === "string" ? { edit: s["edit"] } : {}),
+  }),
   head: () => ({ meta: [{ title: "New quote — Tarko CRM" }] }),
   component: NewQuote,
 });
 
 type Product = Awaited<ReturnType<typeof listProducts>>[number];
 // rateEdited: a hand-typed ₹/kg on the line wins over the quote's rate card.
-type Draft = Line & { key: string; rateEdited: boolean };
+// rollLen: metres per roll (pipes in metres only); the roll layout is also written into the description.
+// fromSaved: loaded from a saved quote, so its ₹/kg is frozen but not an edit made now.
+type Draft = Line & { key: string; rateEdited: boolean; rollLen?: number; fromSaved?: boolean };
 type RateForm = {
   raw: string;
   rawNonIsi: string; // blank = no separate non-ISI price
@@ -108,6 +115,14 @@ function NewQuote() {
     queryFn: () => listCustomers(),
     staleTime: 60_000,
   });
+  const { edit: editId } = Route.useSearch();
+  // Editing a saved quote: load it into the builder once everything it needs is available.
+  const editing = useQuery({
+    queryKey: ["quote", editId],
+    queryFn: () => getQuote({ data: { id: editId ?? "" } }),
+    enabled: !!editId,
+  });
+  const [editLoaded, setEditLoaded] = useState(false);
 
   const [brandId, setBrandId] = useState("");
   const [customerId, setCustomerId] = useState("");
@@ -197,8 +212,42 @@ function NewQuote() {
     return { ...l, rateKg, unitPrice: l.weightKg > 0 ? l.weightKg * rateKg : l.unitPrice };
   });
   const totals = computeTotals(priced, num(extra), { inclusive: false, igst });
+  // Roll length (m) of a pipe line: what the user set, else read from the description, else the product's.
+  const rollLenOf = (l: Draft): number => {
+    if (l.rollLen != null) return l.rollLen;
+    const parsed = parseRoll(l.description);
+    if (parsed) return parsed.len;
+    const lens = (prods.data?.find((x) => x.id === l.productId)?.roll_lengths ?? "")
+      .split("/")
+      .map(Number)
+      .filter(Boolean);
+    return lens.find((x) => l.qty >= x && l.qty % x === 0) ?? lens[0] ?? 0;
+  };
+  const isRollPipe = (l: Line) => l.category === "pipe" && l.unit === "m";
+  // Keeps "· N rolls × L m" in the description in step with qty and roll length.
+  const normRoll = (l: Draft, len = rollLenOf(l)): Draft =>
+    isRollPipe(l) ? { ...l, rollLen: len, description: withRolls(l.description, l.qty, len) } : l;
   const patch = (key: string, p: Partial<Draft>) =>
-    setLines((l) => l.map((x) => (x.key === key ? { ...x, ...p } : x)));
+    setLines((l) =>
+      l.map((x) => {
+        if (x.key !== key) return x;
+        const next = { ...x, ...p };
+        return "qty" in p || "rollLen" in p ? normRoll(next, p.rollLen) : next;
+      }),
+    );
+  // Changing the roll length keeps the number of rolls and recomputes the total metres.
+  const setRollLen = (l: Draft, len: number) => {
+    const old = rollLenOf(l);
+    const rolls = old > 0 ? l.qty / old : 0;
+    patch(
+      l.key,
+      rolls > 0 && len > 0 ? { rollLen: len, qty: +(rolls * len).toFixed(3) } : { rollLen: len },
+    );
+  };
+  const setRolls = (l: Draft, rolls: number) => {
+    const len = rollLenOf(l);
+    if (len > 0) patch(l.key, { qty: +(rolls * len).toFixed(3) });
+  };
   const usedGroups = uniq(lines.map((l) => l.rateGroupId).filter(Boolean));
   const shownGroups = (pricing.data?.groups ?? []).filter(
     (g) => !usedGroups.length || usedGroups.includes(g.id),
@@ -214,33 +263,46 @@ function NewQuote() {
     const tab = share ? window.open("", "_blank") : null;
     setSaving(true);
     try {
-      const out = priced.map(({ key: _k, rateEdited: _r, rateGroupId: _g, ...l }) => ({
-        ...l,
-        description: isNonIsiLine({ ...l, rateGroupId: _g })
-          ? `${l.description} · Non-ISI`
-          : l.description,
-      }));
-      const { id, quoteNo } = await createQuote({
-        data: {
-          brandId: brand.id,
-          customerId: customerId || null,
-          presetId: presetId || null,
-          profileId: profileId || null,
-          nonIsi,
-          newCustomer: !customerId && nc.name.trim() ? nc : null,
-          igst,
-          extra: num(extra),
-          notes,
-          terms: selectedTerms,
-          enquiryId: fromEnquiry?.e.id ?? null,
-          lines: out,
-        },
-      });
+      const out = priced.map(
+        ({ key: _k, rateEdited: _r, rateGroupId: _g, rollLen: _rl, fromSaved: _fs, ...l }) => ({
+          ...l,
+          description: isNonIsiLine({ ...l, rateGroupId: _g })
+            ? `${l.description} · Non-ISI`
+            : l.description,
+        }),
+      );
+      const body = {
+        brandId: brand.id,
+        customerId: customerId || null,
+        presetId: presetId || null,
+        profileId: profileId || null,
+        nonIsi,
+        newCustomer: !customerId && nc.name.trim() ? nc : null,
+        igst,
+        extra: num(extra),
+        notes,
+        terms: selectedTerms,
+        lines: out,
+      };
+      let id: string;
+      let quoteNo: string;
+      if (editId) {
+        const r = await updateQuote({ data: { id: editId, ...body } });
+        id = editId;
+        quoteNo = editing.data?.quote.quote_no ?? "";
+        toast.success(r.changed ? "Quote updated" : "No changes to save");
+        qc.invalidateQueries({ queryKey: ["quote", editId] });
+        qc.invalidateQueries({ queryKey: ["audit", editId] });
+      } else {
+        ({ id, quoteNo } = await createQuote({
+          data: { ...body, enquiryId: fromEnquiry?.e.id ?? null },
+        }));
+      }
       if (tab) {
         const cust = customers.data?.find((c) => c.id === customerId);
         tab.location.href = buildWhatsAppUrl({
           quoteNo,
-          quoteDate: new Date().toISOString().slice(0, 10),
+          quoteDate: editing.data?.quote.quote_date ?? new Date().toISOString().slice(0, 10),
           customerName: cust?.name ?? (nc.name.trim() || null),
           customerPhone: cust?.phone ?? (nc.phone.trim() || null),
           companyName: [brand.name, brand.tagline, brand.phone].filter(Boolean).join(" · "),
@@ -285,7 +347,7 @@ function NewQuote() {
       disabled={saving || !lines.length}
       className="h-12 rounded-xl px-6 text-base font-semibold"
     >
-      {saving ? "Saving…" : "Save quote"}
+      {saving ? "Saving…" : editId ? "Save changes" : "Save quote"}
     </Button>
   );
   const shareBtn = (
@@ -302,7 +364,7 @@ function NewQuote() {
   );
 
   const addLine = (l: Line, quiet = false) => {
-    setLines((x) => [...x, { ...l, key: crypto.randomUUID(), rateEdited: false }]);
+    setLines((x) => [...x, normRoll({ ...l, key: crypto.randomUUID(), rateEdited: false })]);
     if (!quiet) toast.success("Added", { duration: 1000 });
   };
   // Desktop catalog click: add the product, or bump its qty by one roll / step if it's already on the quote.
@@ -310,7 +372,7 @@ function NewQuote() {
     const step =
       (p.roll_lengths ?? "").split("/").map(Number).find(Boolean) ?? (p.unit === "m" ? 100 : 10);
     const existing = lines.find((l) => l.productId === p.id);
-    if (existing) return patch(existing.key, { qty: existing.qty + step });
+    if (existing) return patch(existing.key, { qty: existing.qty + (rollLenOf(existing) || step) });
     addLine(
       {
         productId: p.id,
@@ -339,6 +401,24 @@ function NewQuote() {
       className={cls}
     />
   );
+  const gstIn = (l: Draft, cls = inputCls) => (
+    <select
+      aria-label="GST rate"
+      value={l.gstRate}
+      onChange={(e) => patch(l.key, { gstRate: Number(e.target.value) })}
+      className={cls}
+    >
+      {uniq([...GST_OPTIONS, l.gstRate])
+        .sort((a, b) => a - b)
+        .map((g) => (
+          <option key={g} value={g}>
+            {g}%
+          </option>
+        ))}
+    </select>
+  );
+  const rollCell =
+    "h-7 rounded-md border border-input bg-background px-1.5 text-right text-xs tabular-nums outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
   const priceIn = (l: Draft, cls = inputCls) =>
     l.weightKg > 0 ? (
       <input
@@ -346,7 +426,9 @@ function NewQuote() {
         inputMode="decimal"
         value={+l.rateKg.toFixed(2) || ""}
         onFocus={(e) => e.currentTarget.select()}
-        onChange={(e) => patch(l.key, { rateKg: num(e.target.value), rateEdited: true })}
+        onChange={(e) =>
+          patch(l.key, { rateKg: num(e.target.value), rateEdited: true, fromSaved: false })
+        }
         className={cls}
       />
     ) : (
@@ -359,14 +441,9 @@ function NewQuote() {
         className={cls}
       />
     );
-  const rollHint = (l: Draft) => {
-    const p = l.productId ? prods.data?.find((x) => x.id === l.productId) : undefined;
-    const len = (p?.roll_lengths ?? "")
-      .split("/")
-      .map(Number)
-      .filter(Boolean)
-      .find((x) => l.qty >= x && l.qty % x === 0);
-    return len ? `${l.qty / len} roll${l.qty / len > 1 ? "s" : ""} × ${len} m` : "";
+  const rollsShown = (l: Draft) => {
+    const len = rollLenOf(l);
+    return len > 0 ? +(l.qty / len).toFixed(2) || "" : "";
   };
   const cell =
     "h-9 w-full rounded-lg border border-input bg-background px-2 text-right text-sm tabular-nums outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
@@ -495,6 +572,42 @@ function NewQuote() {
     toast.message(`Quoting enquiry: ${fromEnquiry.e.title}`);
   }, [fromEnquiry, customers.data, brands.data, prefilled]);
 
+  useEffect(() => {
+    const d = editing.data;
+    if (!d || editLoaded || !customers.data || !brands.data || !termsQ.data || !prods.data) return;
+    const { quote: q, customer, lines: saved } = d;
+    setBrandId(q.brand_id);
+    if (q.preset_id) setPresetId(q.preset_id);
+    if (q.profile_id) setProfileId(q.profile_id);
+    setNonIsi(!!q.non_isi);
+    setIgst(!!q.igst);
+    setExtra(q.extra_charges ? String(q.extra_charges) : "");
+    setNotes(q.notes ?? "");
+    if (customer) {
+      setCustomerId(customer.id);
+      setCustText(custLabel(customer));
+    }
+    const wanted = (q.terms ?? "")
+      .split("\n")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    setTermSel(new Set(termsQ.data.filter((t) => wanted.includes(t.text)).map((t) => t.id)));
+    setExtraTerms(wanted.filter((t) => !termsQ.data.some((x) => x.text === t)));
+    setTermsSeeded(true);
+    // Saved prices stay as they were (rateEdited); the "· Non-ISI" tag is re-added on save.
+    setLines(
+      saved.map((l) => ({
+        ...l,
+        description: l.description.replace(/\s*·\s*Non-ISI$/i, ""),
+        rateGroupId: prods.data.find((p) => p.id === l.productId)?.rate_group_id ?? null,
+        key: crypto.randomUUID(),
+        rateEdited: true,
+        fromSaved: true,
+      })),
+    );
+    setEditLoaded(true);
+  }, [editing.data, editLoaded, customers.data, brands.data, termsQ.data, prods.data]);
+
   const selectCls =
     "h-11 w-full rounded-xl border border-input bg-background px-3 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
   const ratesSummary = shownGroups
@@ -503,7 +616,7 @@ function NewQuote() {
 
   return (
     <PageShell
-      title="New quote"
+      title={editId ? `Edit ${editing.data?.quote.quote_no ?? "quote"}` : "New quote"}
       wide
       bar={
         <div className="flex items-center justify-between gap-2">
@@ -720,17 +833,46 @@ function NewQuote() {
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <Field label={`Qty (${UNIT_LABELS[l.unit]})`}>{qtyIn(l)}</Field>
+                    {isRollPipe(l) && (
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <Field label="Roll length (m)">
+                          <input
+                            aria-label="Roll length (m)"
+                            inputMode="decimal"
+                            placeholder="m"
+                            value={rollLenOf(l) || ""}
+                            onFocus={(e) => e.currentTarget.select()}
+                            onChange={(e) => setRollLen(l, num(e.target.value))}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <Field label="Rolls">
+                          <input
+                            aria-label="Number of rolls"
+                            inputMode="decimal"
+                            value={rollsShown(l)}
+                            onFocus={(e) => e.currentTarget.select()}
+                            onChange={(e) => setRolls(l, num(e.target.value))}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <Field label="Total (m)">{qtyIn(l)}</Field>
+                      </div>
+                    )}
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {!isRollPipe(l) && (
+                        <Field label={`Qty (${UNIT_LABELS[l.unit]})`}>{qtyIn(l)}</Field>
+                      )}
                       <Field
                         label={
                           l.weightKg > 0
-                            ? `₹/kg${l.rateEdited ? " (edited)" : ""}`
+                            ? `₹/kg${l.rateEdited && !l.fromSaved ? " (edited)" : ""}`
                             : `₹/${UNIT_LABELS[l.unit]}`
                         }
                       >
                         {priceIn(l)}
                       </Field>
+                      <Field label="GST">{gstIn(l)}</Field>
                     </div>
                     <div className="mt-2 flex items-baseline justify-between text-sm tabular-nums">
                       <span className="text-muted-foreground">
@@ -760,7 +902,7 @@ function NewQuote() {
                         <th className="w-20 px-1 text-right font-semibold">Kg</th>
                         <th className="w-24 px-1 text-right font-semibold">₹/kg</th>
                         <th className="w-24 px-1 text-right font-semibold">₹/unit</th>
-                        <th className="w-14 px-1 text-right font-semibold">GST</th>
+                        <th className="w-20 px-1 text-right font-semibold">GST</th>
                         <th className="w-28 px-1 text-right font-semibold">Amount</th>
                         <th className="w-8" />
                       </tr>
@@ -773,13 +915,36 @@ function NewQuote() {
                             <p className="text-xs text-muted-foreground">
                               {[
                                 CATEGORY_LABELS[l.category],
-                                rollHint(l),
                                 isNonIsiLine(l) && "Non-ISI",
-                                l.rateEdited && "₹/kg edited",
+                                l.rateEdited && !l.fromSaved && "₹/kg edited",
                               ]
                                 .filter(Boolean)
                                 .join(" · ")}
                             </p>
+                            {isRollPipe(l) && (
+                              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                                <span>Roll</span>
+                                <input
+                                  aria-label="Roll length (m)"
+                                  inputMode="decimal"
+                                  placeholder="m"
+                                  value={rollLenOf(l) || ""}
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  onChange={(e) => setRollLen(l, num(e.target.value))}
+                                  className={`${rollCell} w-14`}
+                                />
+                                <span>m ×</span>
+                                <input
+                                  aria-label="Number of rolls"
+                                  inputMode="decimal"
+                                  value={rollsShown(l)}
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  onChange={(e) => setRolls(l, num(e.target.value))}
+                                  className={`${rollCell} w-12`}
+                                />
+                                <span>rolls</span>
+                              </div>
+                            )}
                           </td>
                           <td className="px-1">
                             <div className="flex items-center gap-1">
@@ -804,7 +969,7 @@ function NewQuote() {
                           <td className="px-1 text-right text-sm">
                             {l.weightKg > 0 ? fmtNum(l.unitPrice) : priceIn(l, cell)}
                           </td>
-                          <td className="px-1 text-right text-sm">{l.gstRate}%</td>
+                          <td className="px-1">{gstIn(l, cell)}</td>
                           <td className="px-1 text-right text-sm font-semibold">
                             {fmtMoney(lineGross(l))}
                           </td>
