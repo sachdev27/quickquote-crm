@@ -61,3 +61,53 @@ export function fittingName(product: string, size: string, description = ""): st
 // List price less a percentage discount, to the paisa.
 export const netPrice = (list: number, discountPct: number) =>
   Math.round(list * (1 - Math.min(100, Math.max(0, discountPct)) / 100) * 100) / 100;
+
+// ---- the fitting products in the catalog -> the options on the quote form ----
+export type FittingRow = {
+  name: string;
+  grade: string | null;
+  hsn: string | null;
+  gst_rate: number;
+};
+export type FittingGroup = {
+  key: string; // "<family>|<product>"
+  family: string;
+  product: string;
+  pair: boolean;
+  sizes: string[]; // "63" or "90x63"
+  hsn: string | null;
+  gst: number;
+};
+
+// "Reducer 90 × 63 mm" -> { product: "Reducer", size: "90x63" }; names that don't end in a size keep
+// the whole name as the product and have no listed sizes.
+export function splitFittingName(name: string): { product: string; size: string } {
+  const m = /^(.*?)\s+(\d+(?:\s*[×x]\s*\d+)?)\s*mm$/i.exec(name.trim());
+  return m
+    ? { product: m[1]!.trim(), size: m[2]!.replace(/\s*[×x]\s*/i, "x") }
+    : { product: name.trim(), size: "" };
+}
+
+export function groupFittings(rows: FittingRow[]): FittingGroup[] {
+  const m = new Map<string, FittingGroup>();
+  for (const r of rows) {
+    const { product, size } = splitFittingName(r.name);
+    const family = r.grade ?? "Fitting";
+    const key = `${family}|${product}`;
+    const g = m.get(key) ?? {
+      key,
+      family,
+      product,
+      pair: false,
+      sizes: [],
+      hsn: r.hsn,
+      gst: r.gst_rate,
+    };
+    if (size) {
+      g.sizes.push(size);
+      if (size.includes("x")) g.pair = true;
+    }
+    m.set(key, g);
+  }
+  return [...m.values()];
+}

@@ -10,8 +10,10 @@ import {
   fittingKey,
   fittingName,
   fittingSize,
+  groupFittings,
   netPrice,
   pairSize,
+  splitFittingName,
 } from "@/lib/fitting";
 import { describeChanges, type AuditSnap } from "@/lib/audit";
 import { ageLabel, daysSince, hueOf, initialsOf, staleness } from "@/lib/board";
@@ -273,5 +275,26 @@ describe("fitting list", () => {
     expect(
       FITTING_LIST.filter((d) => d.pair).every((d) => /Reducer|Reducing|Saddle/.test(d.product)),
     ).toBe(true);
+  });
+});
+
+describe("fitting catalog groups", () => {
+  it("splits names and groups by family and product", () => {
+    expect(splitFittingName("Reducer 90 × 63 mm")).toEqual({ product: "Reducer", size: "90x63" });
+    expect(splitFittingName("Coupler 63 mm")).toEqual({ product: "Coupler", size: "63" });
+    expect(splitFittingName("Ball valve")).toEqual({ product: "Ball valve", size: "" });
+    const g = groupFittings([
+      { name: "Reducer 90 × 63 mm", grade: "Electrofusion", hsn: "3917 40 00", gst_rate: 18 },
+      { name: "Reducer 110 × 63 mm", grade: "Electrofusion", hsn: "3917 40 00", gst_rate: 18 },
+      { name: "Reducer 90 × 63 mm", grade: "Butt-weld", hsn: "3917 40 00", gst_rate: 18 },
+      { name: "Coupler 63 mm", grade: "Electrofusion", hsn: "3917 40 00", gst_rate: 18 },
+    ]);
+    expect(g.map((x) => x.key)).toEqual([
+      "Electrofusion|Reducer",
+      "Butt-weld|Reducer",
+      "Electrofusion|Coupler",
+    ]);
+    expect(g[0]).toMatchObject({ pair: true, sizes: ["90x63", "110x63"] });
+    expect(g[2]).toMatchObject({ pair: false, sizes: ["63"] });
   });
 });

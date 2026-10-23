@@ -1438,7 +1438,7 @@ function CatalogPanel({
           </p>
         </>
       ) : cat === "fitting" ? (
-        <FittingForm onAdd={onAddLine} />
+        <FittingForm onAdd={onAddLine} catalog={products.filter((p) => p.category === "fitting")} />
       ) : (
         <ul className="-my-1 divide-y divide-border/60">
           {others.length === 0 && (
@@ -1935,7 +1935,9 @@ function AddItemSheet({
           </>
         )}
 
-        {cat === "fitting" && <FittingForm onAdd={onAdd} />}
+        {cat === "fitting" && (
+          <FittingForm onAdd={onAdd} catalog={products.filter((p) => p.category === "fitting")} />
+        )}
 
         {cat === "sprinkler" && (
           <>
