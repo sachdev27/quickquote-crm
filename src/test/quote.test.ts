@@ -5,7 +5,14 @@ import { pipeSpec } from "@/lib/pipe-spec";
 import { stateOf, validUntil } from "@/lib/quote-doc";
 import { parseRoll, withRolls } from "@/lib/rolls";
 import { fyOf, invoiceNoOf, todayIST } from "@/lib/invoice";
-import { fittingName, fittingSize, netPrice } from "@/lib/fitting";
+import {
+  FITTING_LIST,
+  fittingKey,
+  fittingName,
+  fittingSize,
+  netPrice,
+  pairSize,
+} from "@/lib/fitting";
 import { describeChanges, type AuditSnap } from "@/lib/audit";
 import { ageLabel, daysSince, hueOf, initialsOf, staleness } from "@/lib/board";
 
@@ -248,5 +255,23 @@ describe("fitting entry", () => {
     expect(netPrice(333, 35)).toBe(216.45);
     expect(netPrice(500, 0)).toBe(500);
     expect(netPrice(500, 150)).toBe(0);
+  });
+});
+
+describe("fitting list", () => {
+  it("joins two sizes and has the sheet families", () => {
+    expect(pairSize("90", "63")).toBe("90x63");
+    expect(pairSize("63", "")).toBe("63");
+    expect(fittingName("Reducer", pairSize("90", "63"), "Electrofusion")).toBe(
+      "Reducer 90 × 63 mm · Electrofusion",
+    );
+    const keys = FITTING_LIST.map(fittingKey);
+    expect(new Set(keys).size).toBe(keys.length); // no duplicates
+    expect(new Set(FITTING_LIST.map((d) => d.family))).toEqual(
+      new Set(["Electrofusion", "Spigot moulded", "Pipe fitting", "Butt-weld"]),
+    );
+    expect(
+      FITTING_LIST.filter((d) => d.pair).every((d) => /Reducer|Reducing|Saddle/.test(d.product)),
+    ).toBe(true);
   });
 });

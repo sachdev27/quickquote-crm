@@ -131,6 +131,7 @@ function NewQuote() {
   const [presetId, setPresetId] = useState("");
   const [profileId, setProfileId] = useState("");
   const [nonIsi, setNonIsi] = useState(false);
+  const [weightBasis, setWeightBasis] = useState<"inhouse" | "is">("inhouse");
   const [rates, setRates] = useState<Record<string, RateForm>>({});
   const [groupPreset, setGroupPreset] = useState<Record<string, string>>({}); // per-grade override of the quote preset
   const [openCard, setOpenCard] = useState("");
@@ -208,9 +209,17 @@ function NewQuote() {
   // Lines priced with a separate non-ISI raw price are labelled so the quote never implies an ISI mark.
   const isNonIsiLine = (l: Line) =>
     nonIsi && !!l.rateGroupId && (rates[l.rateGroupId]?.rawNonIsi.trim() ?? "") !== "";
+  // In-house weights (the products' own) are the default; "IS 4984" prices catalog pipes on the standard's weights.
+  const lineWeightKg = (l: Draft) => {
+    if (weightBasis !== "is" || !l.productId) return l.weightKg;
+    const p = prods.data?.find((x) => x.id === l.productId);
+    const sdr = p?.category === "pipe" && p.size_mm ? sdrFor(p.grade ?? "", pnNumber(p.pn)) : null;
+    return p?.size_mm && sdr ? pipeKgPerM(p.size_mm, sdr) : l.weightKg;
+  };
   const priced: Draft[] = lines.map((l) => {
     const rateKg = l.rateEdited || !l.rateGroupId ? l.rateKg : rateOf(l.rateGroupId);
-    return { ...l, rateKg, unitPrice: l.weightKg > 0 ? l.weightKg * rateKg : l.unitPrice };
+    const weightKg = lineWeightKg(l);
+    return { ...l, weightKg, rateKg, unitPrice: weightKg > 0 ? weightKg * rateKg : l.unitPrice };
   });
   const totals = computeTotals(priced, num(extra), { inclusive: false, igst });
   // Roll length (m) of a pipe line: what the user set, else read from the description, else the product's.
@@ -636,7 +645,7 @@ function NewQuote() {
     >
       <div className="space-y-4">
         {/* command bar: who, which brand, which price basis — one row on desktop */}
-        <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2.2fr)_repeat(4,minmax(0,1fr))]">
+        <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2.2fr)_repeat(5,minmax(0,1fr))]">
           <div className="sm:col-span-2 lg:col-span-1">
             <input
               list="customer-list"
@@ -712,6 +721,16 @@ function NewQuote() {
             <option value="non">Non-ISI</option>
           </select>
           <select
+            aria-label="Weights"
+            value={weightBasis}
+            className={`${selectCls} ${weightBasis === "is" ? "border-amber-400 text-amber-800" : ""}`}
+            onChange={(e) => setWeightBasis(e.target.value as "inhouse" | "is")}
+            title="Which weights price the pipes: your factory weights or the IS 4984 standard"
+          >
+            <option value="inhouse">In-house weights</option>
+            <option value="is">IS 4984 weights</option>
+          </select>
+          <select
             aria-label="Profile"
             value={profileId}
             className={selectCls}
@@ -766,7 +785,7 @@ function NewQuote() {
                         quickAdd();
                       } else if (e.key === "Escape") setQuick("");
                     }}
-                    placeholder="Quick add: brand OD PN PE roll/cut, qty: tarko 63 6 pe63 roll x2 · 90 8 300m · sprinkler x10   ( / )"
+                    placeholder="Quick add: brand OD PN PE, qty: tarko 63 6 pe63 x2 · 90 8 300m · sprinkler x10   ( / )"
                     className={`${inputCls} h-11 text-sm`}
                   />
                   {suggestions.length > 0 && (
@@ -2035,7 +2054,7 @@ function AddItemSheet({
               </Field>
             )}
             <div className="grid grid-cols-2 gap-2">
-              <Field label="HSN">
+              <Field label="HSN/SAC">
                 <input
                   value={cu.hsn}
                   onChange={(e) => setCu({ ...cu, hsn: e.target.value })}

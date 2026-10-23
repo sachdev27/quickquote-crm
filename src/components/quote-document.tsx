@@ -198,7 +198,7 @@ export function QuoteDocument({
                     <tr className="bg-[var(--qd-accent)] text-left text-[7pt] uppercase tracking-wide text-white">
                       <Th className="w-[7mm] text-center">Sr.</Th>
                       <Th>Description of goods</Th>
-                      <Th className="w-[16mm]">HSN</Th>
+                      <Th className="w-[17mm]">HSN/SAC</Th>
                       <Th className="w-[17mm] text-right">Qty</Th>
                       <Th className="w-[17mm] text-right">Rate (₹)</Th>
                       <Th className="w-[10mm] text-right">GST</Th>
@@ -248,11 +248,11 @@ export function QuoteDocument({
                 {/* 4. Tax summary and totals */}
                 <section className="mt-[3mm] grid break-inside-avoid grid-cols-[1fr_64mm] gap-[6mm]">
                   <div>
-                    <Label>Tax summary (HSN-wise)</Label>
+                    <Label>Tax summary (HSN/SAC-wise)</Label>
                     <table className="mt-[1.5mm] w-full border-collapse text-[7.5pt]">
                       <thead>
                         <tr className="border-y border-[var(--qd-line)] bg-[var(--qd-soft)] text-left text-[var(--qd-muted)]">
-                          <th className="px-[1.5mm] py-[0.8mm] font-medium">HSN</th>
+                          <th className="px-[1.5mm] py-[0.8mm] font-medium">HSN/SAC</th>
                           <th className="px-[1.5mm] py-[0.8mm] text-right font-medium">
                             Taxable (₹)
                           </th>
