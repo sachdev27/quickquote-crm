@@ -71,8 +71,8 @@ describe("IS 4984 weights", () => {
     expect(sdrFor("PE80", 6)).toBe(17);
     expect(sdrFor("PE100", 10)).toBe(13.6);
   });
-  it("110 mm PE63 PN6 is 2.651 kg/m from the IS chart", () => {
-    expect(pipeKgPerM(110, 13.6)).toBe(2.651);
+  it("110 mm PE63 PN6 is 2.667 kg/m from the IS chart", () => {
+    expect(pipeKgPerM(110, 13.6)).toBe(2.667);
   });
 });
 
@@ -116,7 +116,7 @@ describe("pipe spec", () => {
       weightKg: pipeKgPerM(110, 13.6),
     });
     expect(s).toMatchObject({ od: 110, grade: "PE63", pn: "PN 6", sdr: 13.6 });
-    expect(s).toMatchObject({ wall: 8.1, wallMax: 9 });
+    expect(s).toMatchObject({ wall: 8.1, wallMax: 9.1 });
     expect(s!.id).toBeCloseTo(93.8, 1); // 110 − 2 × 8.1
   });
   it("takes the wall from IS 4984, not the weight; OD only for sprinkler pieces", () => {

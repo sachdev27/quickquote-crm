@@ -252,6 +252,8 @@ export const bulkUpdateRates = createServerFn({ method: "POST" })
       field: z.enum(["raw_kg", "raw_kg_non_isi", "production_kg", "transport_kg", "margin"]),
       mode: z.enum(["set", "add"]),
       value: z.number().finite().min(-1e6).max(1e6),
+      // margin only: also switch the rows between % and flat ₹/kg (sprinkler stays flat ₹/piece)
+      marginType: z.enum(["pct", "flat"]).optional(),
       presetIds: z.array(z.string()).min(1),
       groupIds: z.array(z.string()).min(1),
     }),
@@ -266,7 +268,14 @@ export const bulkUpdateRates = createServerFn({ method: "POST" })
       await getDb()
     )
       .update(rates)
-      .set({ [data.field]: expr })
+      .set({
+        [data.field]: expr,
+        ...(data.field === "margin" && data.marginType
+          ? {
+              margin_is_pct: sql`case when ${rates.group_id} = 'SPRINKLER' then ${rates.margin_is_pct} else ${data.marginType === "pct" ? 1 : 0} end`,
+            }
+          : {}),
+      })
       .where(
         and(
           eq(rates.profile_id, data.profileId),

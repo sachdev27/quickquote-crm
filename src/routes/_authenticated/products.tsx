@@ -39,7 +39,7 @@ import {
   saveRate,
   setProductWeight,
 } from "@/data/api";
-import { LAST_PRESET, newPipe, normalizePn, sectionOf, shortName } from "@/lib/catalog";
+import { LAST_BRAND, LAST_PRESET, newPipe, normalizePn, sectionOf, shortName } from "@/lib/catalog";
 import {
   CATEGORY_LABELS,
   GST_OPTIONS,
@@ -49,6 +49,7 @@ import {
   fmtNum,
   ratePerKg,
   rateKgFor,
+  sprinklerPrice,
   SPRINKLER_GROUP,
   withBrandRaw,
   type Category,
@@ -60,7 +61,8 @@ import { csvObjects, toCsv } from "@/lib/csv";
 import { useIsDesktop } from "@/hooks/use-mobile";
 import { useMe } from "@/hooks/use-me";
 import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
-import { IS_ODS, IS_SDRS, isSpec } from "@/lib/is4984";
+import { WeightExplainer } from "@/components/weight-explainer";
+import { IS_EDITIONS, IS_SDRS, isOds, isSpec, type IsEdition } from "@/lib/is4984";
 
 export const Route = createFileRoute("/_authenticated/products")({
   head: () => ({ meta: [{ title: "Products & pricing — Tarko CRM" }] }),
@@ -171,6 +173,24 @@ function ProductsAdmin() {
   };
   // Grid can show any brand's effective ₹/kg: that brand's raw (if set) replaces the preset raw.
   const [viewBrand, setViewBrand] = useState("");
+  useEffect(() => {
+    const bs = brands.data;
+    if (bs?.length && !bs.some((b) => b.id === viewBrand))
+      setViewBrand(bs.find((b) => b.id === recall(LAST_BRAND))?.id ?? bs[0]!.id);
+  }, [brands.data, viewBrand]);
+  // A sprinkler pipe of the viewed brand, to show a worked piece price on the grid and the edit sheet.
+  const sprinklerSample = prods.data
+    ?.filter(
+      (p) =>
+        p.category === "sprinkler" && p.weight_kg > 0 && (!p.brand_id || p.brand_id === viewBrand),
+    )
+    .sort(
+      (a, b) => (a.size_mm ?? 0) - (b.size_mm ?? 0) || (a.length_m ?? 0) - (b.length_m ?? 0),
+    )[0];
+  const brandRawOf = (group: string) =>
+    pricing.data?.brandRaw.find(
+      (x) => x.profile_id === profileId && x.brand_id === viewBrand && x.group_id === group,
+    );
   const gridRow = (preset: string, group: string) => {
     const r = rateRow(preset, group);
     const b = viewBrand
@@ -206,7 +226,8 @@ function ProductsAdmin() {
 
   // Sprinkler pipe is priced per piece: raw × weight + production ₹ + margin ₹ (both flat).
   const isSprinkler = card?.group.toUpperCase() === SPRINKLER_GROUP;
-  const sample = prods.data?.find((p) => p.category === "sprinkler" && p.weight_kg > 0);
+  const sample = sprinklerSample;
+  const sprinklerRaw = brandRawOf(SPRINKLER_GROUP)?.raw_kg ?? n(card?.raw ?? "");
   async function submitCard(e: React.FormEvent) {
     e.preventDefault();
     if (!card) return;
@@ -613,6 +634,7 @@ function ProductsAdmin() {
               }
               onBulk={() => setBulk(true)}
               onEditGroup={(g) => setGroupForm({ id: g.id, name: g.name })}
+              sprinklerSample={sprinklerSample}
             />
             <BrandRawCard
               brands={brands.data ?? []}
@@ -736,25 +758,29 @@ function ProductsAdmin() {
                 </>
               )}
               <div className="grid grid-cols-2 gap-2">
-                <Field label="Raw material ₹/kg">
-                  <input
-                    inputMode="decimal"
-                    value={card.raw}
-                    onFocus={(e) => e.currentTarget.select()}
-                    onChange={(e) => setCard({ ...card, raw: e.target.value })}
-                    className={inputCls}
-                  />
-                </Field>
-                <Field label="Non-ISI raw ₹/kg (optional)">
-                  <input
-                    inputMode="decimal"
-                    value={card.rawNonIsi}
-                    placeholder={`same as ISI (${card.raw || 0})`}
-                    onFocus={(e) => e.currentTarget.select()}
-                    onChange={(e) => setCard({ ...card, rawNonIsi: e.target.value })}
-                    className={inputCls}
-                  />
-                </Field>
+                {!isSprinkler && (
+                  <Field label="Raw material ₹/kg">
+                    <input
+                      inputMode="decimal"
+                      value={card.raw}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => setCard({ ...card, raw: e.target.value })}
+                      className={inputCls}
+                    />
+                  </Field>
+                )}
+                {!isSprinkler && (
+                  <Field label="Non-ISI raw ₹/kg (optional)">
+                    <input
+                      inputMode="decimal"
+                      value={card.rawNonIsi}
+                      placeholder={`same as ISI (${card.raw || 0})`}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => setCard({ ...card, rawNonIsi: e.target.value })}
+                      className={inputCls}
+                    />
+                  </Field>
+                )}
                 <Field label={`Production ₹/${isSprinkler ? "piece" : "kg"}`}>
                   <input
                     inputMode="decimal"
@@ -798,14 +824,15 @@ function ProductsAdmin() {
               )}
               {isSprinkler ? (
                 <p className="rounded-xl bg-secondary px-4 py-3 text-sm text-muted-foreground tabular-nums">
-                  Price per piece = raw × piece weight + production + margin
+                  Price per piece = raw × piece weight + production + margin. Raw is the brand's
+                  price on the right ({fmtNum(sprinklerRaw)}/kg).
                   {sample && (
                     <>
                       <br />
                       {sample.name} ({fmtNum(sample.weight_kg, 3)} kg) ={" "}
                       <b className="text-foreground">
                         {fmtMoney(
-                          n(card.raw) * sample.weight_kg + n(card.production) + n(card.margin),
+                          sprinklerRaw * sample.weight_kg + n(card.production) + n(card.margin),
                         )}
                       </b>
                     </>
@@ -1067,7 +1094,9 @@ function PricingGrid({
   onNewGroup,
   onBulk,
   onEditGroup,
+  sprinklerSample,
 }: {
+  sprinklerSample?: { weight_kg: number } | undefined;
   onEditGroup: (g: { id: string; name: string }) => void;
   pricing: Pricing;
   profileId: string;
@@ -1161,15 +1190,12 @@ function PricingGrid({
           cell to edit its rate; tap a preset or grade name to rename or delete it.
         </p>
         <div className="space-y-2 lg:flex lg:flex-wrap lg:items-end lg:justify-between lg:gap-2 lg:space-y-0">
-          <Field label="Prices for brand (a brand's own raw price replaces the preset raw)">
+          <Field label="Prices for brand (the brand's raw price from the right-hand card)">
             <Chips
               label="Show prices for brand"
               value={viewBrand}
               onChange={onViewBrand}
-              options={[
-                { value: "", label: "Preset raw" },
-                ...brands.map((b) => ({ value: b.id, label: b.name })),
-              ]}
+              options={[...brands.map((b) => ({ value: b.id, label: b.name }))]}
             />
           </Field>
           <div className="grid grid-cols-2 gap-2 lg:flex lg:gap-1.5">
@@ -1227,14 +1253,16 @@ function PricingGrid({
                               <span>
                                 <span className="block text-base font-bold lg:text-sm">
                                   {g.id === SPRINKLER_GROUP
-                                    ? `+${fmtMoney(r.production_kg + r.margin)}/pc`
+                                    ? sprinklerSample
+                                      ? `${fmtMoney(sprinklerPrice(r, sprinklerSample.weight_kg))}/pc`
+                                      : `+${fmtMoney(r.production_kg + r.margin)}/pc`
                                     : fmtMoney(ratePerKg(r))}
                                 </span>
                                 <span
                                   className={`block text-[10px] ${r.brandApplied ? "font-semibold text-primary" : "text-muted-foreground"}`}
                                 >
                                   {g.id === SPRINKLER_GROUP
-                                    ? `raw × wt + ${fmtNum(r.production_kg)} + ${fmtNum(r.margin)}`
+                                    ? `${sprinklerSample ? `${fmtNum(r.raw_kg)} × ${fmtNum(sprinklerSample.weight_kg)} kg` : "raw × wt"} + ${fmtNum(r.production_kg)} + ${fmtNum(r.margin)}`
                                     : parts(r)}
                                   {r.brandApplied && " · brand raw"}
                                 </span>
@@ -1308,6 +1336,7 @@ function BulkSheet({
   const [field, setField] = useState<BulkField>("raw_kg");
   const [mode, setMode] = useState<"add" | "set">("set");
   const [value, setValue] = useState("");
+  const [marginType, setMarginType] = useState<"" | "pct" | "flat">("");
   const [presets, setPresets] = useState<string[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
   useEffect(() => {
@@ -1318,7 +1347,14 @@ function BulkSheet({
   }, [open, pricing]);
   const toggle = (xs: string[], x: string) =>
     xs.includes(x) ? xs.filter((y) => y !== x) : [...xs, x];
-  const unit = field === "margin" ? "(% or ₹/kg, per each rate's margin type)" : "₹/kg";
+  const unit =
+    field === "margin"
+      ? marginType === "pct"
+        ? "%"
+        : marginType === "flat"
+          ? "₹/kg"
+          : "(% or ₹/kg, per each rate's margin type)"
+      : "₹/kg";
 
   async function apply() {
     const v = Number(value);
@@ -1327,7 +1363,15 @@ function BulkSheet({
       return void toast.error("Pick at least one preset and grade");
     try {
       const { updated } = await bulkUpdateRates({
-        data: { profileId, field, mode, value: v, presetIds: presets, groupIds: groups },
+        data: {
+          profileId,
+          field,
+          mode,
+          value: v,
+          ...(field === "margin" && marginType ? { marginType } : {}),
+          presetIds: presets,
+          groupIds: groups,
+        },
       });
       onDone();
       onOpenChange(false);
@@ -1381,6 +1425,23 @@ function BulkSheet({
               }))}
             />
           </Field>
+          {field === "margin" && (
+            <Field label="Margin type">
+              <Chips
+                label="Margin type"
+                value={marginType}
+                onChange={setMarginType}
+                options={[
+                  { value: "" as const, label: "Keep each" },
+                  { value: "pct" as const, label: "Margin %" },
+                  { value: "flat" as const, label: "Margin ₹/kg" },
+                ]}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Sprinkler margin is always ₹ per piece and keeps its type.
+              </p>
+            </Field>
+          )}
           <Field label="How">
             <Chips
               label="Mode"
@@ -1464,7 +1525,7 @@ function WeightChart({
 }) {
   const [editing, setEditing] = useState(false);
   // In-house = your factory weights (what quotes use). IS 4984 is the reference chart, read-only.
-  const [basis, setBasis] = useState<"inhouse" | "is">("inhouse");
+  const [basis, setBasis] = useState<"inhouse" | "is" | "matrix">("inhouse");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [adding, setAdding] = useState<Adding | null>(null);
@@ -1636,6 +1697,7 @@ function WeightChart({
               [
                 ["inhouse", "In-house"],
                 ["is", "IS 4984"],
+                ["matrix", "IS 4984 chart"],
               ] as const
             ).map(([v, label]) => (
               <button
@@ -1645,7 +1707,7 @@ function WeightChart({
                 aria-checked={basis === v}
                 onClick={() => {
                   setBasis(v);
-                  if (v === "is") {
+                  if (v !== "inhouse") {
                     setEditing(false);
                     setDraft({});
                   }
@@ -1663,7 +1725,9 @@ function WeightChart({
           <p className="text-sm text-muted-foreground">
             {basis === "inhouse"
               ? "kg per metre · your factory weights, used on quotes · amber = more than 5% from IS"
-              : "kg per metre and wall thickness · IS 4984:2016 reference (read-only)"}
+              : basis === "is"
+                ? "kg per metre and wall thickness for your sizes · from the IS 4984 chart (read-only)"
+                : "the complete IS 4984:2016 chart · every size, SDR and PN (read-only)"}
           </p>
         </div>
         {editing ? (
@@ -1700,432 +1764,661 @@ function WeightChart({
         ) : null}
       </div>
 
-      {table && (
-        <Card title="New table">
-          <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Grade">
-              <div className="space-y-2">
-                <Chips
-                  label="Grade"
-                  value={table.grade}
-                  onChange={(g) => setTable({ ...table, grade: g })}
-                  options={[...new Set(pipes.map((p) => p.grade ?? "").filter(Boolean))].map(
-                    (g) => ({ value: g, label: g }),
-                  )}
-                />
-                <input
-                  value={table.grade}
-                  onChange={(e) => setTable({ ...table, grade: e.target.value.toUpperCase() })}
-                  placeholder="or type, e.g. PE80"
-                  className={inputCls}
-                />
-              </div>
-            </Field>
-            <Field label="Sizes (mm, comma separated)">
-              <input
-                value={table.sizes}
-                onChange={(e) => setTable({ ...table, sizes: e.target.value })}
-                placeholder="32, 40, 50, 63, 75"
-                className={inputCls}
-              />
-            </Field>
-            <Field label="PN values (comma separated)">
-              <input
-                value={table.pns}
-                onChange={(e) => setTable({ ...table, pns: e.target.value })}
-                placeholder="4, 6"
-                className={inputCls}
-              />
-            </Field>
-            {table.roll !== "cut" && (
-              <Field label="Roll lengths (m)">
-                <input
-                  value={table.lens}
-                  onChange={(e) => setTable({ ...table, lens: e.target.value })}
-                  placeholder="100/200"
-                  className={inputCls}
-                />
-              </Field>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Creates every size × PN with IS 4984 weights (edit after). Uses the grade's rate group:{" "}
-            {table.grade
-              ? (pipes.find((p) => p.grade === table.grade)?.rate_group_id ??
-                `${table.grade} (must exist under Pricing)`)
-              : "—"}
-            .
-          </p>
-          <div className="flex gap-2">
-            <Button variant="ghost" className="h-10 rounded-xl" onClick={() => setTable(null)}>
-              Cancel
-            </Button>
-            <Button
-              className="h-10 flex-1 rounded-xl font-semibold"
-              disabled={busy}
-              onClick={async () => {
-                const sizes = table.sizes
-                  .split(/[,\s]+/)
-                  .map(Number)
-                  .filter((n) => Number.isInteger(n) && n > 0);
-                const pns = table.pns
-                  .split(/[,\s]+/)
-                  .map((x) => normalizePn(x))
-                  .filter((x) => pnNumber(x) > 0);
-                if (!table.grade || !sizes.length || !pns.length)
-                  return void toast.error("Enter grade, sizes and PN values");
-                const inchOf = (size: number) => pipes.find((p) => p.size_mm === size)?.inch ?? "";
-                await create(
-                  table.grade,
-                  table.roll,
-                  sizes.flatMap((size) =>
-                    pns.map((pn) => ({ size, pn, inch: inchOf(size), lens: table.lens })),
-                  ),
-                );
-                setTable(null);
-              }}
-            >
-              {busy ? "Creating…" : "Create table"}
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        {tables.map((t) => (
-          <Card
-            key={t.key}
-            title={t.grade}
-            aside={
-              <span className="flex gap-3 text-xs font-semibold text-primary">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setAdding({
-                      grade: t.grade,
-                      roll: t.roll,
-                      kind: "size",
-                      size: "",
-                      inch: "",
-                      lens: t.rows.at(-1)?.roll_lengths ?? "",
-                      pn: "",
-                      pns: t.pns,
-                    })
-                  }
-                >
-                  + Size
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setAdding({
-                      grade: t.grade,
-                      roll: t.roll,
-                      kind: "pn",
-                      size: "",
-                      inch: "",
-                      lens: "",
-                      pn: "",
-                      pns: [],
-                    })
-                  }
-                >
-                  + PN
-                </button>
-                {basis === "inhouse" && !editing && (
-                  <button type="button" onClick={() => setEditing(true)}>
-                    Edit
-                  </button>
-                )}
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="text-destructive"
-                  onClick={() =>
-                    remove(
-                      t.rows.map((p) => p.id),
-                      `the whole ${t.grade} table`,
-                    )
-                  }
-                >
-                  Delete table
-                </button>
-              </span>
-            }
-          >
-            <table className="w-full tabular-nums">
-              <thead>
-                <tr className="text-xs text-muted-foreground">
-                  <th className="py-1 text-left font-semibold">Size</th>
-                  {t.pns.map((pn) => (
-                    <th key={pn} className="py-1 text-right font-semibold">
-                      {pn}
-                      {editing && (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          aria-label={`Delete ${t.grade} ${pn}`}
-                          title={`Delete ${pn} for every size`}
-                          className="ml-1 align-middle text-muted-foreground hover:text-destructive"
-                          onClick={() =>
-                            remove(
-                              t.rows.filter((p) => p.pn === pn).map((p) => p.id),
-                              `${t.grade} ${pn}`,
-                            )
-                          }
-                        >
-                          <X className="inline h-3 w-3" />
-                        </button>
+      {basis === "matrix" ? (
+        <IsChart />
+      ) : (
+        <>
+          {table && (
+            <Card title="New table">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Grade">
+                  <div className="space-y-2">
+                    <Chips
+                      label="Grade"
+                      value={table.grade}
+                      onChange={(g) => setTable({ ...table, grade: g })}
+                      options={[...new Set(pipes.map((p) => p.grade ?? "").filter(Boolean))].map(
+                        (g) => ({ value: g, label: g }),
                       )}
-                    </th>
-                  ))}
-                  {editing && <th className="w-6" />}
-                </tr>
-              </thead>
-              <tbody>
-                {t.sizes.map((size) => (
-                  <tr key={size} className="border-t border-border/60">
-                    <td className="py-1.5 pr-2 text-sm font-semibold">
-                      {size} mm{" "}
-                      <span className="text-xs font-normal text-muted-foreground">
-                        {t.rows.find((p) => p.size_mm === size)?.inch}
-                      </span>
-                    </td>
-                    {t.pns.map((pn) => {
-                      const p = t.rows.find((x) => x.size_mm === size && x.pn === pn);
-                      if (!p)
-                        return (
-                          <td key={pn} className="text-right">
-                            <button
-                              type="button"
-                              disabled={busy}
-                              aria-label={`Add ${size} mm ${pn}`}
-                              className="rounded-md px-2 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                              onClick={() =>
-                                confirm(`Add ${t.grade} ${size} mm ${pn}?`) &&
-                                create(t.grade, t.roll, [
-                                  {
-                                    size,
-                                    pn,
-                                    inch: t.rows.find((x) => x.size_mm === size)?.inch ?? "",
-                                    lens:
-                                      t.rows.find((x) => x.size_mm === size)?.roll_lengths ?? "",
-                                  },
-                                ])
-                              }
-                            >
-                              +
-                            </button>
-                          </td>
-                        );
-                      const ref = isWeight(p);
-                      const differs =
-                        basis === "inhouse" &&
-                        ref != null &&
-                        Math.abs(ref - p.weight_kg) / ref > 0.05;
-                      return (
-                        <td key={pn} className="py-1 text-right">
-                          {editing ? (
-                            <div className="flex justify-end">{cellInput(p)}</div>
-                          ) : (
-                            <span
-                              className={`text-sm font-semibold ${differs ? "text-amber-700" : ""}`}
-                            >
-                              {fmtNum(basis === "is" ? (ref ?? p.weight_kg) : p.weight_kg, 3)}
-                            </span>
-                          )}
-                          {basis === "inhouse" && ref != null && (
-                            <span className="block text-[10px] text-muted-foreground">
-                              IS {fmtNum(ref, 3)}
-                            </span>
-                          )}
-                          {basis === "is" && isWall(p) && (
-                            <span className="block text-[10px] text-muted-foreground">
-                              {isWall(p)}
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    {editing && (
-                      <td className="pl-1 text-right">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          aria-label={`Delete ${size} mm`}
-                          title={`Delete ${size} mm for every PN`}
-                          className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-destructive"
-                          onClick={() =>
-                            remove(
-                              t.rows.filter((p) => p.size_mm === size).map((p) => p.id),
-                              `${t.grade} ${size} mm`,
-                            )
-                          }
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {adding && adding.grade === t.grade && adding.roll === t.roll && (
-              <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-3">
-                <p className="text-sm font-semibold">
-                  {adding.kind === "size"
-                    ? `New ${t.grade} size`
-                    : `New ${t.grade} pressure class (all sizes)`}{" "}
-                  · IS 4984 weights
-                </p>
-                {adding.kind === "size" ? (
-                  <>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Field label="Size (mm)">
-                        <input
-                          inputMode="numeric"
-                          value={adding.size}
-                          onChange={(e) => setAdding({ ...adding, size: e.target.value })}
-                          placeholder="125"
-                          className={inputCls}
-                        />
-                      </Field>
-                      <Field label="Inch">
-                        <input
-                          value={adding.inch}
-                          onChange={(e) => setAdding({ ...adding, inch: e.target.value })}
-                          placeholder='5"'
-                          className={inputCls}
-                        />
-                      </Field>
-                      {t.roll !== "cut" && (
-                        <Field label="Roll lengths">
-                          <input
-                            value={adding.lens}
-                            onChange={(e) => setAdding({ ...adding, lens: e.target.value })}
-                            placeholder="50/100"
-                            className={inputCls}
-                          />
-                        </Field>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {t.pns.map((pn) => {
-                        const on = adding.pns.includes(pn);
-                        return (
-                          <button
-                            key={pn}
-                            type="button"
-                            role="checkbox"
-                            aria-checked={on}
-                            onClick={() =>
-                              setAdding({
-                                ...adding,
-                                pns: on ? adding.pns.filter((x) => x !== pn) : [...adding.pns, pn],
-                              })
-                            }
-                            className={`h-10 rounded-xl border px-3 text-sm font-semibold tabular-nums ${on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}
-                          >
-                            {pn}
-                            {Number(adding.size) > 0 && (
-                              <span className="ml-1 text-[10px] font-normal opacity-80">
-                                {fmtNum(isKg(t.grade, Number(adding.size), pn), 3)}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <Field label="PN">
+                    />
                     <input
-                      inputMode="decimal"
-                      value={adding.pn}
-                      onChange={(e) => setAdding({ ...adding, pn: e.target.value })}
-                      placeholder="10"
+                      value={table.grade}
+                      onChange={(e) => setTable({ ...table, grade: e.target.value.toUpperCase() })}
+                      placeholder="or type, e.g. PE80"
+                      className={inputCls}
+                    />
+                  </div>
+                </Field>
+                <Field label="Sizes (mm, comma separated)">
+                  <input
+                    value={table.sizes}
+                    onChange={(e) => setTable({ ...table, sizes: e.target.value })}
+                    placeholder="32, 40, 50, 63, 75"
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="PN values (comma separated)">
+                  <input
+                    value={table.pns}
+                    onChange={(e) => setTable({ ...table, pns: e.target.value })}
+                    placeholder="4, 6"
+                    className={inputCls}
+                  />
+                </Field>
+                {table.roll !== "cut" && (
+                  <Field label="Roll lengths (m)">
+                    <input
+                      value={table.lens}
+                      onChange={(e) => setTable({ ...table, lens: e.target.value })}
+                      placeholder="100/200"
                       className={inputCls}
                     />
                   </Field>
                 )}
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    className="h-10 rounded-xl"
-                    onClick={() => setAdding(null)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    className="h-10 flex-1 rounded-xl font-semibold"
-                    disabled={busy}
-                    onClick={() => submitAdd(t)}
-                  >
-                    {busy ? "Saving…" : "Add"}
-                  </Button>
-                </div>
               </div>
-            )}
-          </Card>
-        ))}
-      </div>
+              <p className="text-xs text-muted-foreground">
+                Creates every size × PN with IS 4984 weights (edit after). Uses the grade's rate
+                group:{" "}
+                {table.grade
+                  ? (pipes.find((p) => p.grade === table.grade)?.rate_group_id ??
+                    `${table.grade} (must exist under Pricing)`)
+                  : "—"}
+                .
+              </p>
+              <div className="flex gap-2">
+                <Button variant="ghost" className="h-10 rounded-xl" onClick={() => setTable(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  className="h-10 flex-1 rounded-xl font-semibold"
+                  disabled={busy}
+                  onClick={async () => {
+                    const sizes = table.sizes
+                      .split(/[,\s]+/)
+                      .map(Number)
+                      .filter((n) => Number.isInteger(n) && n > 0);
+                    const pns = table.pns
+                      .split(/[,\s]+/)
+                      .map((x) => normalizePn(x))
+                      .filter((x) => pnNumber(x) > 0);
+                    if (!table.grade || !sizes.length || !pns.length)
+                      return void toast.error("Enter grade, sizes and PN values");
+                    const inchOf = (size: number) =>
+                      pipes.find((p) => p.size_mm === size)?.inch ?? "";
+                    await create(
+                      table.grade,
+                      table.roll,
+                      sizes.flatMap((size) =>
+                        pns.map((pn) => ({ size, pn, inch: inchOf(size), lens: table.lens })),
+                      ),
+                    );
+                    setTable(null);
+                  }}
+                >
+                  {busy ? "Creating…" : "Create table"}
+                </Button>
+              </div>
+            </Card>
+          )}
 
-      <SprinklerCard items={others} brands={brands} onChanged={onCreated} />
+          <div className="grid gap-4 xl:grid-cols-2">
+            {tables.map((t) => (
+              <Card
+                key={t.key}
+                title={t.grade}
+                aside={
+                  <span className="flex gap-3 text-xs font-semibold text-primary">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAdding({
+                          grade: t.grade,
+                          roll: t.roll,
+                          kind: "size",
+                          size: "",
+                          inch: "",
+                          lens: t.rows.at(-1)?.roll_lengths ?? "",
+                          pn: "",
+                          pns: t.pns,
+                        })
+                      }
+                    >
+                      + Size
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAdding({
+                          grade: t.grade,
+                          roll: t.roll,
+                          kind: "pn",
+                          size: "",
+                          inch: "",
+                          lens: "",
+                          pn: "",
+                          pns: [],
+                        })
+                      }
+                    >
+                      + PN
+                    </button>
+                    {basis === "inhouse" && !editing && (
+                      <button type="button" onClick={() => setEditing(true)}>
+                        Edit
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="text-destructive"
+                      onClick={() =>
+                        remove(
+                          t.rows.map((p) => p.id),
+                          `the whole ${t.grade} table`,
+                        )
+                      }
+                    >
+                      Delete table
+                    </button>
+                  </span>
+                }
+              >
+                <table className="w-full tabular-nums">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground">
+                      <th className="py-1 text-left font-semibold">Size</th>
+                      {t.pns.map((pn) => (
+                        <th key={pn} className="py-1 text-right font-semibold">
+                          {pn}
+                          {editing && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-label={`Delete ${t.grade} ${pn}`}
+                              title={`Delete ${pn} for every size`}
+                              className="ml-1 align-middle text-muted-foreground hover:text-destructive"
+                              onClick={() =>
+                                remove(
+                                  t.rows.filter((p) => p.pn === pn).map((p) => p.id),
+                                  `${t.grade} ${pn}`,
+                                )
+                              }
+                            >
+                              <X className="inline h-3 w-3" />
+                            </button>
+                          )}
+                        </th>
+                      ))}
+                      {editing && <th className="w-6" />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {t.sizes.map((size) => (
+                      <tr key={size} className="border-t border-border/60">
+                        <td className="py-1.5 pr-2 text-sm font-semibold">
+                          {size} mm{" "}
+                          <span className="text-xs font-normal text-muted-foreground">
+                            {t.rows.find((p) => p.size_mm === size)?.inch}
+                          </span>
+                        </td>
+                        {t.pns.map((pn) => {
+                          const p = t.rows.find((x) => x.size_mm === size && x.pn === pn);
+                          if (!p)
+                            return (
+                              <td key={pn} className="text-right">
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  aria-label={`Add ${size} mm ${pn}`}
+                                  className="rounded-md px-2 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                                  onClick={() =>
+                                    confirm(`Add ${t.grade} ${size} mm ${pn}?`) &&
+                                    create(t.grade, t.roll, [
+                                      {
+                                        size,
+                                        pn,
+                                        inch: t.rows.find((x) => x.size_mm === size)?.inch ?? "",
+                                        lens:
+                                          t.rows.find((x) => x.size_mm === size)?.roll_lengths ??
+                                          "",
+                                      },
+                                    ])
+                                  }
+                                >
+                                  +
+                                </button>
+                              </td>
+                            );
+                          const ref = isWeight(p);
+                          const differs =
+                            basis === "inhouse" &&
+                            ref != null &&
+                            Math.abs(ref - p.weight_kg) / ref > 0.05;
+                          return (
+                            <td key={pn} className="py-1 text-right">
+                              {editing ? (
+                                <div className="flex justify-end">{cellInput(p)}</div>
+                              ) : (
+                                <span
+                                  className={`text-sm font-semibold ${differs ? "text-amber-700" : ""}`}
+                                >
+                                  {fmtNum(basis === "is" ? (ref ?? p.weight_kg) : p.weight_kg, 3)}
+                                </span>
+                              )}
+                              {basis === "inhouse" && ref != null && (
+                                <span className="block text-[10px] text-muted-foreground">
+                                  IS {fmtNum(ref, 3)}
+                                </span>
+                              )}
+                              {basis === "is" && isWall(p) && (
+                                <span className="block text-[10px] text-muted-foreground">
+                                  {isWall(p)}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        {editing && (
+                          <td className="pl-1 text-right">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-label={`Delete ${size} mm`}
+                              title={`Delete ${size} mm for every PN`}
+                              className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-destructive"
+                              onClick={() =>
+                                remove(
+                                  t.rows.filter((p) => p.size_mm === size).map((p) => p.id),
+                                  `${t.grade} ${size} mm`,
+                                )
+                              }
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
 
-      {basis === "is" && <IsChart />}
+                {adding && adding.grade === t.grade && adding.roll === t.roll && (
+                  <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-3">
+                    <p className="text-sm font-semibold">
+                      {adding.kind === "size"
+                        ? `New ${t.grade} size`
+                        : `New ${t.grade} pressure class (all sizes)`}{" "}
+                      · IS 4984 weights
+                    </p>
+                    {adding.kind === "size" ? (
+                      <>
+                        <div className="grid grid-cols-3 gap-2">
+                          <Field label="Size (mm)">
+                            <input
+                              inputMode="numeric"
+                              value={adding.size}
+                              onChange={(e) => setAdding({ ...adding, size: e.target.value })}
+                              placeholder="125"
+                              className={inputCls}
+                            />
+                          </Field>
+                          <Field label="Inch">
+                            <input
+                              value={adding.inch}
+                              onChange={(e) => setAdding({ ...adding, inch: e.target.value })}
+                              placeholder='5"'
+                              className={inputCls}
+                            />
+                          </Field>
+                          {t.roll !== "cut" && (
+                            <Field label="Roll lengths">
+                              <input
+                                value={adding.lens}
+                                onChange={(e) => setAdding({ ...adding, lens: e.target.value })}
+                                placeholder="50/100"
+                                className={inputCls}
+                              />
+                            </Field>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {t.pns.map((pn) => {
+                            const on = adding.pns.includes(pn);
+                            return (
+                              <button
+                                key={pn}
+                                type="button"
+                                role="checkbox"
+                                aria-checked={on}
+                                onClick={() =>
+                                  setAdding({
+                                    ...adding,
+                                    pns: on
+                                      ? adding.pns.filter((x) => x !== pn)
+                                      : [...adding.pns, pn],
+                                  })
+                                }
+                                className={`h-10 rounded-xl border px-3 text-sm font-semibold tabular-nums ${on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}
+                              >
+                                {pn}
+                                {Number(adding.size) > 0 && (
+                                  <span className="ml-1 text-[10px] font-normal opacity-80">
+                                    {fmtNum(isKg(t.grade, Number(adding.size), pn), 3)}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <Field label="PN">
+                        <input
+                          inputMode="decimal"
+                          value={adding.pn}
+                          onChange={(e) => setAdding({ ...adding, pn: e.target.value })}
+                          placeholder="10"
+                          className={inputCls}
+                        />
+                      </Field>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        className="h-10 rounded-xl"
+                        onClick={() => setAdding(null)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        className="h-10 flex-1 rounded-xl font-semibold"
+                        disabled={busy}
+                        onClick={() => submitAdd(t)}
+                      >
+                        {busy ? "Saving…" : "Add"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+
+          <SprinklerCard items={others} brands={brands} onChanged={onCreated} />
+        </>
+      )}
     </div>
   );
 }
 
 // The full IS 4984:2016 chart: wall thickness (min–max, mm) and kg per metre for every OD and SDR.
 function IsChart() {
+  // Pick any of PE grade, PN and OD: the matching columns, rows and cells light up, the rest fade.
+  const [grade, setGrade] = useState("");
+  const [pn, setPn] = useState("");
+  const [od, setOd] = useState("");
+  const [sdr, setSdr] = useState(""); // a clicked column; grade + PN is the other way to pick one
+  const [edition, setEdition] = useState<IsEdition>("amd2");
+  const IS_PN = IS_EDITIONS[edition].pn;
+  const ods = isOds(edition);
+  const odRef = useRef<HTMLInputElement>(null);
+  // Once grade and PN are both chosen, the next thing to give is the OD.
+  const toOd = () => setTimeout(() => odRef.current?.focus(), 0);
+  const grades = Object.keys(IS_PN);
+  const pnOptions = [
+    ...new Set((grade ? [grade] : grades).flatMap((g) => IS_PN[g]!.filter((x) => x != null))),
+  ].sort((a, b) => a! - b!);
+  const colOn = (i: number) =>
+    (!sdr || Number(sdr) === IS_SDRS[i]) &&
+    (grade ? grades.filter((g) => g === grade) : grades).some((g) => {
+      const v = IS_PN[g]![i];
+      return v != null && (!pn || v === Number(pn));
+    });
+  const rowOn = (o: number) => !od || String(o).startsWith(od);
+  const active = !!(grade || pn || od || sdr);
+  const exact = !!od && !!(sdr || (grade && pn));
+  // Click a cell: its OD and SDR are selected (and the PN, if a grade is chosen). Click it again to clear.
+  const pick = (o: number, v: number) => {
+    if (!isSpec(o, v, edition)) return;
+    if (od === String(o) && sdr === String(v)) {
+      setOd("");
+      setSdr("");
+      return;
+    }
+    setOd(String(o));
+    setSdr(String(v));
+    const i = IS_SDRS.indexOf(v);
+    if (grade) setPn(String(IS_PN[grade]![i] ?? ""));
+  };
+  const chosenSdr = sdr
+    ? Number(sdr)
+    : grade && pn
+      ? IS_SDRS[IS_PN[grade]!.indexOf(Number(pn))]
+      : undefined;
+  const chosen = od && chosenSdr ? isSpec(Number(od), chosenSdr, edition) : null;
+  // what the walkthrough explains: the clicked cell, else a worked example (32 mm, PE63, PN 6)
+  const sample32 = isSpec(32, 13.6, edition);
+  const explain =
+    chosen && chosenSdr
+      ? { od: Number(od), sdr: chosenSdr, spec: chosen, sample: false }
+      : sample32
+        ? { od: 32, sdr: 13.6, spec: sample32, sample: true }
+        : null;
+  const cellCls = (on: boolean, hit: boolean) =>
+    hit
+      ? exact
+        ? "bg-primary/15 ring-2 ring-inset ring-primary"
+        : "bg-primary/10"
+      : active && !on
+        ? "opacity-30"
+        : "";
   return (
     <Card title="IS 4984:2016 · wall thickness (mm) and weight (kg/m) by SDR">
-      <div className="-mx-4 overflow-x-auto px-4">
-        <table className="w-full min-w-[56rem] border-separate border-spacing-0 text-right tabular-nums">
-          <thead className="text-xs text-muted-foreground">
-            <tr>
-              <th className="sticky left-0 bg-card py-1 pr-3 text-left font-semibold">OD mm</th>
-              {IS_SDRS.map((sdr) => (
-                <th key={sdr} className="px-2 py-1 font-semibold">
-                  SDR {sdr}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {IS_ODS.map((od) => (
-              <tr key={od} className="border-t border-border/60">
-                <td className="sticky left-0 border-t border-border/60 bg-card py-1 pr-3 text-left text-sm font-semibold">
-                  {od}
-                </td>
-                {IS_SDRS.map((sdr) => {
-                  const t = isSpec(od, sdr);
-                  return (
-                    <td key={sdr} className="border-t border-border/60 px-2 py-1">
-                      {t ? (
-                        <>
-                          <span className="block text-sm font-semibold">{fmtNum(t.kgPerM, 3)}</span>
-                          <span className="block text-[10px] text-muted-foreground">
-                            {fmtNum(t.min, 1)}–{fmtNum(t.max, 1)}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">·</span>
-                      )}
-                    </td>
-                  );
-                })}
+      <div className="space-y-5 pt-1">
+        <div className="space-y-3 rounded-2xl bg-secondary/60 p-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Chips
+              label="Edition"
+              value={edition}
+              onChange={(e) => {
+                setEdition(e);
+                setPn("");
+              }}
+              options={(Object.keys(IS_EDITIONS) as IsEdition[]).map((e) => ({
+                value: e,
+                label: IS_EDITIONS[e].label,
+              }))}
+            />
+            <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <a
+                href="/standards/IS4984_2016_Amd1_BIS.pdf"
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-semibold text-primary"
+              >
+                ↓ IS 4984:2016 with Amendment 1 (BIS copy, PDF)
+              </a>
+              <a
+                href="https://www.standardsbis.in"
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-semibold text-primary"
+              >
+                BIS site (amendments) ↗
+              </a>
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Showing: <b className="text-foreground">{IS_EDITIONS[edition].label}</b>.{" "}
+            {IS_EDITIONS[edition].note}
+          </p>
+        </div>
+        <div className="space-y-3 rounded-2xl border border-border p-4">
+          <div className="grid gap-4 md:grid-cols-[auto_1fr_8rem] md:items-end">
+            <Field label="PE grade">
+              <Chips
+                label="PE grade"
+                value={grade}
+                onChange={(g) => {
+                  setSdr("");
+                  setGrade(g);
+                  // keep the PN if this grade is made in it
+                  const keep = !!g && !!pn && IS_PN[g]!.includes(Number(pn));
+                  if (!keep) setPn("");
+                  else toOd();
+                }}
+                options={[
+                  { value: "", label: "Any" },
+                  ...grades.map((g) => ({ value: g, label: g })),
+                ]}
+              />
+            </Field>
+            <Field label="PN (bar)">
+              <Chips
+                label="PN"
+                value={pn}
+                onChange={(v) => {
+                  setSdr("");
+                  setPn(v);
+                  if (grade && v) toOd();
+                }}
+                options={[
+                  { value: "", label: "Any" },
+                  ...pnOptions.map((x) => ({ value: String(x), label: `PN ${x}` })),
+                ]}
+              />
+            </Field>
+            <Field label="OD (mm)">
+              <input
+                ref={odRef}
+                inputMode="numeric"
+                value={od}
+                list="is-ods"
+                placeholder="e.g. 110"
+                onChange={(e) => setOd(e.target.value.trim())}
+                className={inputCls}
+              />
+              <datalist id="is-ods">
+                {ods.map((o) => (
+                  <option key={o} value={o} />
+                ))}
+              </datalist>
+            </Field>
+          </div>
+          {active && (
+            <button
+              type="button"
+              className="self-start text-xs font-semibold text-primary"
+              onClick={() => {
+                setGrade("");
+                setPn("");
+                setOd("");
+                setSdr("");
+              }}
+            >
+              Clear selection
+            </button>
+          )}
+          {chosen && chosenSdr && (
+            <p className="rounded-xl bg-primary/10 px-3 py-2 text-sm">
+              <b>{od} mm</b> · SDR {chosenSdr} ·{" "}
+              {grades
+                .map((g) => {
+                  const v = IS_PN[g]![IS_SDRS.indexOf(chosenSdr)];
+                  return v != null ? `${g} PN ${v}` : null;
+                })
+                .filter(Boolean)
+                .join(" / ")}{" "}
+              · wall{" "}
+              <b>
+                {fmtNum(chosen.min, 1)}–{fmtNum(chosen.max, 1)} mm
+              </b>{" "}
+              · <b>{fmtNum(chosen.kgPerM, 3)} kg/m</b> · ID ≈{" "}
+              {fmtNum(Number(od) - 2 * chosen.min, 1)} mm
+            </p>
+          )}
+        </div>
+        {explain && (
+          <WeightExplainer
+            key={`${explain.od}-${explain.sdr}-${edition}`}
+            od={explain.od}
+            sdr={explain.sdr}
+            min={explain.spec.min}
+            max={explain.spec.max}
+            grades={grades.map((g) => ({
+              grade: g,
+              pn: IS_PN[g]![IS_SDRS.indexOf(explain.sdr)] ?? null,
+            }))}
+            grade={grade || undefined}
+            chartKg={explain.spec.kgPerM}
+            sample={explain.sample}
+          />
+        )}
+        <div className="-mx-4 overflow-x-auto px-4">
+          <table className="w-full min-w-[56rem] border-separate border-spacing-0 text-right tabular-nums">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="sticky left-0 bg-card py-1 pr-3 text-left font-semibold">OD mm</th>
+                {IS_SDRS.map((v, i) => (
+                  <th
+                    key={v}
+                    className={`px-2 py-1 align-top font-semibold ${active && !colOn(i) ? "opacity-30" : colOn(i) && (grade || pn) ? "bg-primary/10" : ""}`}
+                  >
+                    <span className="block text-sm text-foreground">SDR {v}</span>
+                    {Object.entries(IS_PN).map(([g, pns]) => (
+                      <span
+                        key={g}
+                        className={`block text-[10px] font-normal ${g === grade ? "font-bold text-primary" : ""}`}
+                      >
+                        {g} {pns[i] != null ? `PN ${pns[i]}` : "–"}
+                      </span>
+                    ))}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {ods.map((o) => (
+                <tr key={o} className="border-t border-border/60">
+                  <td
+                    className={`sticky left-0 border-t border-border/60 bg-card py-1 pr-3 text-left text-sm font-semibold ${od && !rowOn(o) ? "opacity-30" : ""}`}
+                  >
+                    {o}
+                  </td>
+                  {IS_SDRS.map((s, i) => {
+                    const t = isSpec(o, s, edition);
+                    const on = colOn(i) && rowOn(o);
+                    return (
+                      <td
+                        key={s}
+                        onClick={() => pick(o, s)}
+                        className={`border-t border-border/60 px-2 py-1 transition-colors ${t ? "cursor-pointer hover:bg-primary/5" : ""} ${cellCls(on, on && !!t)}`}
+                      >
+                        {t ? (
+                          <>
+                            <span className="block text-sm font-semibold">
+                              {fmtNum(t.kgPerM, 3)}
+                            </span>
+                            <span className="block text-[10px] text-muted-foreground">
+                              {fmtNum(t.min, 1)}–{fmtNum(t.max, 1)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">·</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Pick a PE grade, a PN and/or an OD: matching columns and rows light up. With all three,
+          the one cell is outlined. Quotes print the min–max wall from this chart.
+        </p>
       </div>
-      <p className="text-xs text-muted-foreground">
-        PE63 / PE80 / PE100 pick their SDR from the pressure class (PN). Quotes print the min–max
-        wall from this chart.
-      </p>
     </Card>
   );
 }
