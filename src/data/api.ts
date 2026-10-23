@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { computeTotals, nextQuoteNo, type Line } from "@/lib/quote";
-import { authed } from "./auth.server";
+import { adminOnly, authed } from "./auth.server";
 import { getDb } from "./env.server";
 import {
   brands,
@@ -17,6 +17,7 @@ import {
   brand_raw,
   terms,
   activities,
+  users,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -49,7 +50,7 @@ export const listBrands = createServerFn({ method: "GET" })
   .handler(async () => (await getDb()).select().from(brands).orderBy(brands.name));
 
 export const saveBrand = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(
     z.object({
       id: z.string().optional(),
@@ -81,7 +82,7 @@ export const saveBrand = createServerFn({ method: "POST" })
   });
 
 export const deleteBrand = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const db = await getDb();
@@ -99,7 +100,7 @@ export const listTerms = createServerFn({ method: "GET" })
   );
 
 export const saveTerm = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ id: z.string().optional(), text: text.min(1), default_on: z.boolean() }))
   .handler(async ({ data }) => {
     const db = await getDb();
@@ -110,7 +111,7 @@ export const saveTerm = createServerFn({ method: "POST" })
   });
 
 export const deleteTerm = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     await (await getDb()).delete(terms).where(eq(terms.id, data.id));
@@ -191,7 +192,7 @@ const rateValues = z.object({
 });
 
 export const saveRate = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(
     rateValues.extend({ profile_id: z.string(), preset_id: z.string(), group_id: z.string() }),
   )
@@ -212,7 +213,7 @@ export const saveRate = createServerFn({ method: "POST" })
 // One change across many presets × groups, e.g. "raw material +₹5 for PE63 in every preset".
 // ponytail: only updates combos that already have a row; add the rate first for brand-new preset/group pairs.
 export const bulkUpdateRates = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(
     z.object({
       profileId: z.string(),
@@ -246,7 +247,7 @@ export const bulkUpdateRates = createServerFn({ method: "POST" })
 
 // New preset starts as a copy of another, so only the differences need typing.
 export const savePreset = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(
     z.object({ id: z.string().optional(), name: text.min(1), copyFrom: z.string().optional() }),
   )
@@ -269,7 +270,7 @@ export const savePreset = createServerFn({ method: "POST" })
 
 // raw_kg null clears the brand's own price (falls back to the preset raw).
 export const saveBrandRaw = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(
     z.object({
       profile_id: z.string(),
@@ -300,7 +301,7 @@ export const saveBrandRaw = createServerFn({ method: "POST" })
 
 // Profiles: a complete set of values for a period. New ones copy another so only changes need typing.
 export const saveProfile = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(
     z.object({ id: z.string().optional(), name: text.min(1), copyFrom: z.string().optional() }),
   )
@@ -326,7 +327,7 @@ export const saveProfile = createServerFn({ method: "POST" })
   });
 
 export const setActiveProfile = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const db = await getDb();
@@ -338,7 +339,7 @@ export const setActiveProfile = createServerFn({ method: "POST" })
   });
 
 export const deleteProfile = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const db = await getDb();
@@ -360,7 +361,7 @@ export const deleteProfile = createServerFn({ method: "POST" })
   });
 
 export const deletePreset = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const db = await getDb();
@@ -372,7 +373,7 @@ export const deletePreset = createServerFn({ method: "POST" })
   });
 
 export const saveGroup = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(
     z.object({
       id: z
@@ -394,7 +395,7 @@ export const saveGroup = createServerFn({ method: "POST" })
   });
 
 export const deleteGroup = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const db = await getDb();
@@ -424,7 +425,7 @@ export const listProducts = createServerFn({ method: "GET" })
   );
 
 export const saveProduct = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(
     z.object({
       id: z.string().optional(),
@@ -477,7 +478,7 @@ const importRow = z.object({
 });
 
 export const importProducts = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ rows: z.array(importRow).min(1).max(2000) }))
   .handler(async ({ data }) => {
     const db = await getDb();
@@ -517,7 +518,7 @@ export const importProducts = createServerFn({ method: "POST" })
   });
 
 export const setProductWeight = createServerFn({ method: "POST" })
-  .middleware([authed])
+  .middleware([adminOnly])
   .validator(z.object({ id: z.string(), weight_kg: z.number().finite().min(0).max(10000) }))
   .handler(async ({ data }) => {
     await (
@@ -713,15 +714,13 @@ export const setQuoteStatus = createServerFn({ method: "POST" })
         })
         .where(eq(quotes.id, data.id)),
       // stage moves are part of the deal's history
-      db
-        .insert(activities)
-        .values({
-          quote_id: data.id,
-          customer_id: q.customer_id,
-          kind: "note",
-          text: `Moved to ${data.status}`,
-          created_by: context.user,
-        }),
+      db.insert(activities).values({
+        quote_id: data.id,
+        customer_id: q.customer_id,
+        kind: "note",
+        text: `Moved to ${data.status}`,
+        created_by: context.user,
+      }),
     ]);
     return { ok: true };
   });
@@ -811,5 +810,46 @@ export const deleteQuote = createServerFn({ method: "POST" })
       db.delete(quote_items).where(eq(quote_items.quote_id, data.id)),
       db.delete(quotes).where(eq(quotes.id, data.id)),
     ]);
+    return { ok: true };
+  });
+
+// ---------- users & roles ----------
+export const whoami = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .handler(async ({ context }) => ({ email: context.user, role: context.role }));
+
+export const listUsers = createServerFn({ method: "GET" })
+  .middleware([adminOnly])
+  .handler(async () => (await getDb()).select().from(users).orderBy(asc(users.email)));
+
+export const saveUser = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(
+    z.object({
+      email: z.string().trim().toLowerCase().email(),
+      name: opt,
+      role: z.enum(["admin", "accountant"]),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    if (data.email === context.user && data.role !== "admin")
+      throw new Error("You can't remove your own admin role.");
+    await db
+      .insert(users)
+      .values({ email: data.email, name: data.name ?? null, role: data.role })
+      .onConflictDoUpdate({
+        target: users.email,
+        set: { name: data.name ?? null, role: data.role },
+      });
+    return { ok: true };
+  });
+
+export const deleteUser = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(z.object({ email: z.string() }))
+  .handler(async ({ data, context }) => {
+    if (data.email === context.user) throw new Error("You can't remove yourself.");
+    await (await getDb()).delete(users).where(eq(users.email, data.email));
     return { ok: true };
   });

@@ -17,7 +17,11 @@ import {
   listTerms,
   saveBrand,
   saveTerm,
+  listUsers,
+  saveUser,
+  deleteUser,
 } from "@/data/api";
+import { useMe } from "@/hooks/use-me";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({ meta: [{ title: "Settings — Tarko CRM" }] }),
@@ -60,6 +64,20 @@ const missing = (b: Partial<Record<Key, string | null>>) =>
   NEEDED.filter(([k]) => !b[k]?.trim()).map(([, l]) => l);
 
 function SettingsPage() {
+  const me = useMe();
+  if (me.role && !me.isAdmin)
+    return (
+      <PageShell title="Settings">
+        <div className="mx-auto max-w-md space-y-4">
+          <AccountCard email={me.email} role={me.role} />
+        </div>
+      </PageShell>
+    );
+  return <SettingsAdmin />;
+}
+
+function SettingsAdmin() {
+  const me = useMe();
   const qc = useQueryClient();
   const desktop = useIsDesktop();
   const { data } = useQuery({
@@ -294,22 +312,8 @@ function SettingsPage() {
 
           <TermsLibrary />
 
-          <section className="space-y-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Account
-            </h2>
-            <div className="rounded-2xl border border-border bg-card p-3 text-sm">
-              <p className="text-muted-foreground">
-                Sign-in is handled by Cloudflare Access for your team.
-              </p>
-              <a
-                href="/cdn-cgi/access/logout"
-                className="mt-2 inline-flex items-center gap-2 font-semibold text-primary"
-              >
-                <LogOut className="h-4 w-4" /> Sign out
-              </a>
-            </div>
-          </section>
+          <UsersSection me={me.email} />
+          <AccountCard email={me.email} role={me.role ?? "admin"} />
         </div>
 
         {/* desktop: inline editor with live letterhead preview */}
@@ -473,6 +477,158 @@ function TermsLibrary() {
           </li>
         )}
       </ul>
+    </section>
+  );
+}
+
+function AccountCard({ email, role }: { email: string; role: string }) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Account
+      </h2>
+      <div className="rounded-2xl border border-border bg-card p-3 text-sm">
+        <p className="font-semibold">{email || "—"}</p>
+        <p className="text-muted-foreground">
+          Role: {role === "admin" ? "Admin" : "Accountant"} · sign-in via Cloudflare Access
+        </p>
+        <a
+          href="/cdn-cgi/access/logout"
+          className="mt-2 inline-flex items-center gap-2 font-semibold text-primary"
+        >
+          <LogOut className="h-4 w-4" /> Sign out
+        </a>
+      </div>
+    </section>
+  );
+}
+
+const ROLE_HELP: Record<string, string> = {
+  admin: "Everything, incl. pricing, products, brands, terms and users",
+  accountant: "Quotes, pipeline, customers, price list. No pricing or product changes",
+};
+
+// Who may use the CRM. Cloudflare Access must also allow their email to sign in.
+function UsersSection({ me }: { me: string }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["users"], queryFn: () => listUsers(), staleTime: 60_000 });
+  const [form, setForm] = useState<null | {
+    email: string;
+    name: string;
+    role: "admin" | "accountant";
+    isNew: boolean;
+  }>(null);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["users"] });
+  async function save() {
+    if (!form) return;
+    try {
+      await saveUser({ data: { email: form.email, name: form.name, role: form.role } });
+      await refresh();
+      setForm(null);
+      toast.success("User saved. Make sure Cloudflare Access also allows this email.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message.slice(0, 160) : "Could not save");
+    }
+  }
+  async function remove(email: string) {
+    if (!confirm(`Remove ${email}? They will no longer be able to use the CRM.`)) return;
+    try {
+      await deleteUser({ data: { email } });
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not remove");
+    }
+  }
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Users & roles
+        </h2>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 text-sm font-semibold text-primary"
+          onClick={() => setForm({ email: "", name: "", role: "accountant", isNew: true })}
+        >
+          <Plus className="h-4 w-4" /> Add user
+        </button>
+      </div>
+      <ul className="divide-y divide-border/60 rounded-2xl border border-border bg-card">
+        {data?.map((u) => (
+          <li key={u.email} className="flex items-center gap-3 p-3 text-sm">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-semibold">{u.name || u.email}</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {u.email}
+                {u.email === me ? " · you" : ""}
+              </span>
+            </span>
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${u.role === "admin" ? "bg-primary/10 text-primary" : "bg-secondary text-secondary-foreground"}`}
+            >
+              {u.role === "admin" ? "Admin" : "Accountant"}
+            </span>
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              onClick={() =>
+                setForm({
+                  email: u.email,
+                  name: u.name ?? "",
+                  role: u.role as "admin",
+                  isNew: false,
+                })
+              }
+            >
+              Edit
+            </button>
+            {u.email !== me && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-destructive"
+                onClick={() => remove(u.email)}
+              >
+                Remove
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {form && (
+        <div className="space-y-2 rounded-2xl border border-primary/40 bg-primary/5 p-3">
+          <input
+            value={form.email}
+            disabled={!form.isNew}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="email@gmail.com"
+            className={`${inputCls} h-10`}
+          />
+          <input
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="Name (optional)"
+            className={`${inputCls} h-10`}
+          />
+          <Chips
+            label="Role"
+            value={form.role}
+            onChange={(r) => setForm({ ...form, role: r })}
+            options={[
+              { value: "admin" as const, label: "Admin" },
+              { value: "accountant" as const, label: "Accountant" },
+            ]}
+          />
+          <p className="text-xs text-muted-foreground">{ROLE_HELP[form.role]}</p>
+          <div className="flex gap-2">
+            <Button variant="ghost" className="h-10 rounded-xl" onClick={() => setForm(null)}>
+              Cancel
+            </Button>
+            <Button className="h-10 flex-1 rounded-xl font-semibold" onClick={save}>
+              Save user
+            </Button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

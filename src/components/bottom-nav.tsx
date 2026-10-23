@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutList, Users, Plus, Settings, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMe } from "@/hooks/use-me";
 
 const LINKS = [
   { to: "/dashboard", label: "Quotes", Icon: LayoutList },
@@ -17,6 +18,7 @@ function useActive() {
 // Mobile: bottom tab bar with a centre "New quote" button. Desktop: nav lives in PageShell's header.
 export function BottomNav() {
   const active = useActive();
+  const { isAdmin } = useMe();
   const item = (on: boolean) =>
     cn(
       "flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-medium transition-colors",
@@ -39,10 +41,12 @@ export function BottomNav() {
           </span>
           <span className="-mt-1">New quote</span>
         </Link>
-        <Link to="/products" className={item(active("/products"))}>
-          <Tag className="h-5 w-5" />
-          Products
-        </Link>
+        {isAdmin && (
+          <Link to="/products" className={item(active("/products"))}>
+            <Tag className="h-5 w-5" />
+            Products
+          </Link>
+        )}
         <Link to="/settings" className={item(active("/settings"))}>
           <Settings className="h-5 w-5" />
           Settings
@@ -68,6 +72,8 @@ export function PageShell({
   children: React.ReactNode;
 }) {
   const active = useActive();
+  const { isAdmin } = useMe();
+  const links = LINKS.filter((l) => isAdmin || l.to !== "/products");
   const navLink = (to: string, on: boolean) =>
     cn(
       "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium",
@@ -88,7 +94,7 @@ export function PageShell({
         >
           <Plus className="h-5 w-5" />
         </Link>
-        {LINKS.map(({ to, label, Icon }) => (
+        {links.map(({ to, label, Icon }) => (
           <Link
             key={to}
             to={to}
@@ -115,7 +121,7 @@ export function PageShell({
           >
             <h1 className="text-lg font-bold text-foreground">{title}</h1>
             <nav className="hidden items-center gap-1 md:flex lg:hidden">
-              {LINKS.map(({ to, label, Icon }) => (
+              {links.map(({ to, label, Icon }) => (
                 <Link key={to} to={to} className={navLink(to, active(to))}>
                   <Icon className="h-4 w-4" />
                   {label}

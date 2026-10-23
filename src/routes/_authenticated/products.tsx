@@ -52,6 +52,7 @@ import {
 import { recall, remember } from "@/lib/utils";
 import { csvObjects, toCsv } from "@/lib/csv";
 import { useIsDesktop } from "@/hooks/use-mobile";
+import { useMe } from "@/hooks/use-me";
 import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
 
 export const Route = createFileRoute("/_authenticated/products")({
@@ -85,6 +86,26 @@ const isWeight = (p: Pick<Product, "grade" | "size_mm" | "pn">) => {
 };
 
 function ProductsPage() {
+  const me = useMe();
+  if (me.role && !me.isAdmin)
+    return (
+      <PageShell title="Products & pricing">
+        <p className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+          Only admins can view and change products and pricing.{" "}
+          <Link
+            to="/price-list"
+            className="font-semibold text-primary underline-offset-2 hover:underline"
+          >
+            Open the price list
+          </Link>{" "}
+          to see current prices.
+        </p>
+      </PageShell>
+    );
+  return <ProductsAdmin />;
+}
+
+function ProductsAdmin() {
   const qc = useQueryClient();
   const pricing = useQuery({
     queryKey: ["pricing"],

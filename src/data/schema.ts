@@ -161,3 +161,10 @@ export const activities = sqliteTable("activities", {
   created_by: text("created_by"),
   created_at: now(),
 });
+
+export const users = sqliteTable("users", {
+  email: text("email").primaryKey(),
+  name: text("name"),
+  role: text("role").notNull(),
+  created_at: now(),
+});
