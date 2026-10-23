@@ -14,6 +14,8 @@ type P = {
 };
 
 export function sectionOf(p: P) {
+  // Fittings are grouped by family, which is kept in the grade column (Electrofusion, Spigot moulded, ...).
+  if (p.category === "fitting" && p.grade) return `Fitting · ${p.grade}`;
   if (p.category !== "pipe") return CATEGORY_LABELS[p.category as Category];
   return `HDPE ${p.grade ?? ""} pipe`;
 }

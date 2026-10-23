@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Field, inputCls } from "@/components/qq";
@@ -9,27 +9,48 @@ import {
   FITTING_SIZES,
   fittingKey,
   fittingName,
+  groupFittings,
   netPrice,
   pairSize,
+  type FittingGroup,
+  type FittingRow,
 } from "@/lib/fitting";
 import { GST_OPTIONS, fmtMoney, type Line } from "@/lib/quote";
 
 const num = (s: string) => (s === "" || isNaN(+s) ? 0 : +s);
-const families = [...new Set(FITTING_LIST.map((d) => d.family))];
+// Built-in list, used only when the catalog has no fittings (everything was deleted).
+const FALLBACK: FittingGroup[] = FITTING_LIST.map((d) => ({
+  key: fittingKey(d),
+  family: d.family,
+  product: d.product,
+  pair: !!d.pair,
+  sizes: [],
+  hsn: null,
+  gst: 18,
+}));
 
 // Non-branded fitting: pick the product, then size (two sizes for reducers and tees), an optional
 // description, quantity and price. An optional discount turns a printed list price into the net price.
-export function FittingForm({ onAdd }: { onAdd: (l: Line) => void }) {
+export function FittingForm({
+  onAdd,
+  catalog,
+}: {
+  onAdd: (l: Line) => void;
+  catalog: FittingRow[];
+}) {
+  const fromCatalog = useMemo(() => groupFittings(catalog), [catalog]);
+  const groups = fromCatalog.length ? fromCatalog : FALLBACK;
+  const families = [...new Set(groups.map((g) => g.family))];
   const settings = useQuery({
     queryKey: ["settings"],
     queryFn: () => getSettings(),
     staleTime: 60_000,
   });
-  const [key, setKey] = useState(fittingKey(FITTING_LIST[0]!));
+  const [key, setKey] = useState(groups[0]!.key);
   const [other, setOther] = useState(""); // product typed by hand when "Other" is chosen
   const [size, setSize] = useState("");
   const [size2, setSize2] = useState("");
-  const [desc, setDesc] = useState(FITTING_LIST[0]!.family);
+  const [desc, setDesc] = useState(groups[0]!.family);
   const [qty, setQty] = useState("1");
   const [price, setPrice] = useState("");
   const [disc, setDisc] = useState("");
@@ -43,16 +64,36 @@ export function FittingForm({ onAdd }: { onAdd: (l: Line) => void }) {
     setGst(settings.data.fittingGst);
   }, [settings.data]);
 
-  const def = FITTING_LIST.find((d) => fittingKey(d) === key);
+  const def = groups.find((g) => g.key === key);
+  // The picked product can vanish (deleted under Products): fall back to the first one.
+  useEffect(() => {
+    if (key !== "other" && !groups.some((g) => g.key === key)) setKey(groups[0]!.key);
+  }, [groups, key]);
   const product = def ? def.product : other.trim();
   const net = disc ? netPrice(num(price), num(disc)) : num(price);
 
+  // The HSN/SAC and GST kept on the product (set once under Products) start the line.
   function pickProduct(k: string) {
     setKey(k);
-    const d = FITTING_LIST.find((x) => fittingKey(x) === k);
-    setDesc(d ? d.family : "");
+    const g = groups.find((x) => x.key === k);
+    setDesc(g ? g.family : "");
+    setSize("");
     setSize2("");
+    if (g?.hsn) setHsn(g.hsn);
+    if (g) setGst(g.gst);
   }
+
+  // Size suggestions come from the catalog: one list for plain products, and for two-size products the
+  // second list follows the first (90 -> 63, 75, 50 ...).
+  const sizes = def?.sizes.length ? def.sizes : FITTING_SIZES;
+  const firsts = [...new Set((def?.pair ? def.sizes : []).map((x) => x.split("x")[0]!))];
+  const seconds = [
+    ...new Set(
+      (def?.pair ? def.sizes : [])
+        .filter((x) => !size || x.startsWith(`${size}x`))
+        .map((x) => x.split("x")[1]!),
+    ),
+  ];
 
   function add() {
     if (!product) return void toast.error("Pick or type the product");
@@ -85,10 +126,16 @@ export function FittingForm({ onAdd }: { onAdd: (l: Line) => void }) {
     }
   };
 
-  const sizeInput = (value: string, set: (v: string) => void, label: string, ph: string) => (
+  const sizeInput = (
+    value: string,
+    set: (v: string) => void,
+    label: string,
+    ph: string,
+    list = "fitting-sizes",
+  ) => (
     <Field label={label}>
       <input
-        list="fitting-sizes"
+        list={list}
         value={value}
         onChange={(e) => set(e.target.value)}
         placeholder={ph}
@@ -108,11 +155,13 @@ export function FittingForm({ onAdd }: { onAdd: (l: Line) => void }) {
         >
           {families.map((f) => (
             <optgroup key={f} label={f}>
-              {FITTING_LIST.filter((d) => d.family === f).map((d) => (
-                <option key={fittingKey(d)} value={fittingKey(d)}>
-                  {d.product}
-                </option>
-              ))}
+              {groups
+                .filter((g) => g.family === f)
+                .map((g) => (
+                  <option key={g.key} value={g.key}>
+                    {g.product}
+                  </option>
+                ))}
             </optgroup>
           ))}
           <option value="other">Other (type it)…</option>
@@ -128,14 +177,25 @@ export function FittingForm({ onAdd }: { onAdd: (l: Line) => void }) {
         />
       )}
       <datalist id="fitting-sizes">
-        {FITTING_SIZES.map((s) => (
-          <option key={s} value={s} />
+        {(def?.pair ? (firsts.length ? firsts : FITTING_SIZES) : sizes).map((x) => (
+          <option key={x} value={x} />
+        ))}
+      </datalist>
+      <datalist id="fitting-sizes-2">
+        {(seconds.length ? seconds : FITTING_SIZES).map((x) => (
+          <option key={x} value={x} />
         ))}
       </datalist>
       {def?.pair ? (
         <div className="grid grid-cols-2 gap-2">
           {sizeInput(size, setSize, product === "Saddle" ? "Pipe (mm)" : "Large (mm)", "90")}
-          {sizeInput(size2, setSize2, product === "Saddle" ? "Outlet (mm)" : "Small (mm)", "63")}
+          {sizeInput(
+            size2,
+            setSize2,
+            product === "Saddle" ? "Outlet (mm)" : "Small (mm)",
+            "63",
+            "fitting-sizes-2",
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">

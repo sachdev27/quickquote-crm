@@ -1462,7 +1462,7 @@ function WeightChart({
   }>(null);
 
   const pipes = products.filter((p) => p.category === "pipe");
-  const others = products.filter((p) => p.category !== "pipe");
+  const others = products.filter((p) => p.category === "sprinkler");
   const tables = [...new Set(pipes.map((p) => `${p.grade ?? ""}|${p.roll ?? "complete"}`))].map(
     (k) => {
       const [grade, roll] = k.split("|") as [string, string];
@@ -2049,7 +2049,7 @@ function WeightChart({
         ))}
       </div>
 
-      <Card title="Sprinkler & fittings · kg per piece">
+      <Card title="Sprinkler · kg per piece">
         <ul className="-my-1 divide-y divide-border/60">
           {others.map((p) => (
             <li key={p.id} className="flex items-center justify-between gap-3 py-2">
@@ -2064,22 +2064,16 @@ function WeightChart({
             </li>
           ))}
         </ul>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="outline"
-            className="h-11 rounded-xl"
-            onClick={() => onAddOther("sprinkler")}
-          >
-            <Plus className="mr-1 h-4 w-4" /> Sprinkler size
-          </Button>
-          <Button
-            variant="outline"
-            className="h-11 rounded-xl"
-            onClick={() => onAddOther("fitting")}
-          >
-            <Plus className="mr-1 h-4 w-4" /> Fitting
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          className="h-11 rounded-xl"
+          onClick={() => onAddOther("sprinkler")}
+        >
+          <Plus className="mr-1 h-4 w-4" /> Sprinkler size
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Fittings have no weight: add or delete them under Products → Fitting.
+        </p>
       </Card>
     </div>
   );
@@ -2163,7 +2157,11 @@ function ProductList({
     const m = new Map<string, Product[]>();
     for (const p of products) {
       if (cat !== "all" && p.category !== cat) continue;
-      if (q && !`${p.name} ${p.size_mm ?? ""}`.toLowerCase().includes(q.toLowerCase())) continue;
+      if (
+        q &&
+        !`${p.name} ${p.size_mm ?? ""} ${p.grade ?? ""}`.toLowerCase().includes(q.toLowerCase())
+      )
+        continue;
       const k = sectionOf(p);
       m.set(k, [...(m.get(k) ?? []), p]);
     }
@@ -2429,12 +2427,14 @@ function ProductList({
                         {fmtMoney(rate)}/kg
                       </p>
                     </button>
-                    <WeightCell
-                      key={`${p.id}-${p.weight_kg}`}
-                      value={p.weight_kg}
-                      unit={p.unit as Unit}
-                      onSave={(v) => onSaveWeight(p, v)}
-                    />
+                    {p.category !== "fitting" && (
+                      <WeightCell
+                        key={`${p.id}-${p.weight_kg}`}
+                        value={p.weight_kg}
+                        unit={p.unit as Unit}
+                        onSave={(v) => onSaveWeight(p, v)}
+                      />
+                    )}
                   </li>
                 );
               })}
@@ -2452,6 +2452,7 @@ function ProductList({
             <ProductMatrix
               products={products.filter(
                 (p) =>
+                  p.category !== "fitting" &&
                   (cat === "all" || p.category === cat) &&
                   (!q || `${p.name} ${p.size_mm ?? ""}`.toLowerCase().includes(q.toLowerCase())),
               )}
@@ -2475,6 +2476,7 @@ function ProductList({
                       <th className="px-2 font-semibold">Grade</th>
                       <th className="px-2 font-semibold">PN</th>
                       <th className="px-2 font-semibold">Roll</th>
+                      <th className="px-2 font-semibold">HSN/SAC</th>
                       <th className="px-2 text-right font-semibold">Weight</th>
                       {pricing?.presets.map((pr) => (
                         <th key={pr.id} className="px-2 text-right font-semibold normal-case">
@@ -2495,7 +2497,7 @@ function ProductList({
                             )}
                           </td>
                           <td
-                            colSpan={5 + (pricing?.presets.length ?? 0)}
+                            colSpan={6 + (pricing?.presets.length ?? 0)}
                             className="pt-4 pb-1 text-xs font-semibold uppercase tracking-wider text-primary"
                           >
                             {title}
@@ -2520,33 +2522,48 @@ function ProductList({
                                   ? `${p.roll_lengths} m`
                                   : "—"}
                             </td>
-                            <td className="px-2" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex justify-end">
-                                <WeightCell
-                                  key={`${p.id}-${p.weight_kg}`}
-                                  value={p.weight_kg}
-                                  unit={p.unit as Unit}
-                                  compact
-                                  onSave={(v) => onSaveWeight(p, v)}
-                                />
-                              </div>
+                            <td className="whitespace-nowrap px-2 text-sm text-muted-foreground">
+                              {p.hsn ?? "—"}
                             </td>
-                            {pricing?.presets.map((pr) => {
-                              const r = pricing.rates.find(
-                                (x) => x.preset_id === pr.id && x.group_id === p.rate_group_id,
-                              );
-                              const up = r
-                                ? ratePerKg(r) * p.weight_kg * (withGst ? 1 + p.gst_rate / 100 : 1)
-                                : 0;
-                              return (
-                                <td
-                                  key={pr.id}
-                                  className={`px-2 text-right text-sm ${pr.id === presetId ? "font-bold" : ""}`}
-                                >
-                                  {r ? `${fmtNum(up)}/${UNIT_LABELS[p.unit as Unit]}` : "—"}
-                                </td>
-                              );
-                            })}
+                            {p.category === "fitting" ? (
+                              <td
+                                colSpan={1 + (pricing?.presets.length ?? 0)}
+                                className="px-2 text-right text-xs text-muted-foreground"
+                              >
+                                price typed on each quote
+                              </td>
+                            ) : (
+                              <td className="px-2" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-end">
+                                  <WeightCell
+                                    key={`${p.id}-${p.weight_kg}`}
+                                    value={p.weight_kg}
+                                    unit={p.unit as Unit}
+                                    compact
+                                    onSave={(v) => onSaveWeight(p, v)}
+                                  />
+                                </div>
+                              </td>
+                            )}
+                            {p.category !== "fitting" &&
+                              pricing?.presets.map((pr) => {
+                                const r = pricing.rates.find(
+                                  (x) => x.preset_id === pr.id && x.group_id === p.rate_group_id,
+                                );
+                                const up = r
+                                  ? ratePerKg(r) *
+                                    p.weight_kg *
+                                    (withGst ? 1 + p.gst_rate / 100 : 1)
+                                  : 0;
+                                return (
+                                  <td
+                                    key={pr.id}
+                                    className={`px-2 text-right text-sm ${pr.id === presetId ? "font-bold" : ""}`}
+                                  >
+                                    {r ? `${fmtNum(up)}/${UNIT_LABELS[p.unit as Unit]}` : "—"}
+                                  </td>
+                                );
+                              })}
                           </tr>
                         ))}
                       </Fragment>
