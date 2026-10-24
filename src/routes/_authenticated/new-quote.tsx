@@ -426,6 +426,14 @@ function NewQuote() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
+  // shortcut label: ⌘ on Apple devices, Ctrl elsewhere (set after mount, so SSR markup matches)
+  const [MOD, setMod] = useState("Ctrl ");
+  const [ALT, setAlt] = useState("Alt+");
+  useEffect(() => {
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+    setMod(mac ? "⌘" : "Ctrl ");
+    setAlt(mac ? "⌥" : "Alt+");
+  }, []);
   const saveBtn = (
     <Button
       onClick={() => save()}
@@ -433,6 +441,9 @@ function NewQuote() {
       className="h-12 rounded-xl px-6 text-base font-semibold"
     >
       {saving ? "Saving…" : editId ? "Save changes" : "Save quote"}
+      <kbd className="ml-2 hidden rounded bg-primary-foreground/20 px-1.5 py-0.5 font-sans text-[11px] font-medium lg:inline">
+        {MOD}↵
+      </kbd>
     </Button>
   );
   const shareBtn = (
@@ -451,14 +462,6 @@ function NewQuote() {
   // After an add from search or the catalog, the line's first field gets focus; Tab past its last field
   // (or Enter) goes back to search.
   const [focusKey, setFocusKey] = useState<string | null>(null);
-  // shortcut label: ⌘ on Apple devices, Ctrl elsewhere (set after mount, so SSR markup matches)
-  const [MOD, setMod] = useState("Ctrl ");
-  const [ALT, setAlt] = useState("Alt+");
-  useEffect(() => {
-    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-    setMod(mac ? "⌘" : "Ctrl ");
-    setAlt(mac ? "⌥" : "Alt+");
-  }, []);
   const custRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!focusKey) return;
