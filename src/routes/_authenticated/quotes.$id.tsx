@@ -24,9 +24,13 @@ import {
   deleteQuote,
   getQuote,
   listActivities,
+  listCustomers,
   setActivityDone,
+  setQuoteCustomer,
   setQuoteStatus,
 } from "@/data/api";
+import { CustomerDialog } from "@/components/customer-dialog";
+import { fullAddress } from "@/lib/quote-doc";
 import { STATUS_LABELS, buildWhatsAppUrl, computeTotals } from "@/lib/quote";
 
 export const Route = createFileRoute("/_authenticated/quotes/$id")({
@@ -188,10 +192,108 @@ function QuoteView() {
           <QuoteDocument data={data} />
         </div>
         <div className="no-print space-y-4 lg:col-start-1 lg:row-start-2 lg:space-y-3">
+          <QuoteCustomer quoteId={id} customer={customer} />
           <ActivityPanel target={{ quoteId: id }} phone={customer?.phone ?? null} />
           <QuoteHistory quoteId={id} />
         </div>
       </div>
     </PageShell>
+  );
+}
+
+type Cust = NonNullable<Awaited<ReturnType<typeof getQuote>>["customer"]>;
+
+// The quotation's customer: see the full record, edit it, or switch to / create another customer.
+function QuoteCustomer({ quoteId, customer }: { quoteId: string; customer: Cust | null }) {
+  const qc = useQueryClient();
+  const { data: all } = useQuery({
+    queryKey: ["customers"],
+    queryFn: () => listCustomers(),
+    staleTime: 60_000,
+  });
+  const [dlg, setDlg] = useState<null | "edit" | "new">(null);
+  const full = customer as (Cust & Record<string, string | null>) | null;
+  // fields still empty on this customer: a nudge to complete the record
+  const missing = full
+    ? (["phone", "gstin", "address", "email"] as const).filter((k) => !full[k])
+    : [];
+
+  async function pick(id: string) {
+    try {
+      await setQuoteCustomer({ data: { quoteId, customerId: id || null } });
+      for (const k of [["quote", quoteId], ["quotes"], ["audit", quoteId]])
+        qc.invalidateQueries({ queryKey: k });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not change customer");
+    }
+  }
+  const line = (v?: string | null) => (v ? <p className="truncate text-sm">{v}</p> : null);
+
+  return (
+    <Card
+      title="Customer"
+      aside={
+        <button
+          type="button"
+          className="text-xs font-semibold text-primary"
+          onClick={() => setDlg(customer ? "edit" : "new")}
+        >
+          {customer ? "Edit details" : "+ Add customer"}
+        </button>
+      }
+    >
+      {customer ? (
+        <div className="space-y-0.5">
+          <p className="font-semibold">{customer.name}</p>
+          {line(full?.["contact_person"] && `Attn: ${full["contact_person"]}`)}
+          {line(customer.phone)}
+          {line(full?.["email"])}
+          {line(customer.gstin && `GSTIN ${customer.gstin}`)}
+          {customer.address && (
+            <p className="whitespace-pre-line text-sm text-muted-foreground">
+              {fullAddress(full!)}
+            </p>
+          )}
+          {missing.length > 0 && (
+            <button
+              type="button"
+              className="mt-1 text-xs text-amber-700 hover:underline"
+              onClick={() => setDlg("edit")}
+            >
+              Missing: {missing.join(", ")}. Complete the record →
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          No customer on this quotation (walk-in). Add one, or pick an existing one below.
+        </p>
+      )}
+      <select
+        aria-label="Change customer"
+        value={customer?.id ?? ""}
+        onChange={(e) => (e.target.value === "__new" ? setDlg("new") : pick(e.target.value))}
+        className={`${inputCls} h-10 text-sm`}
+      >
+        <option value="">
+          {customer ? "Remove customer (walk-in)" : "Pick an existing customer…"}
+        </option>
+        {all?.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+            {c.phone ? ` · ${c.phone}` : ""}
+          </option>
+        ))}
+        <option value="__new">+ New customer…</option>
+      </select>
+      <CustomerDialog
+        open={!!dlg}
+        onOpenChange={(o) => !o && setDlg(null)}
+        customer={
+          dlg === "edit" ? (all?.find((c) => c.id === customer?.id) ?? (customer as never)) : null
+        }
+        quoteId={quoteId}
+      />
+    </Card>
   );
 }

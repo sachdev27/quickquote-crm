@@ -5,6 +5,7 @@ import { z } from "zod";
 import { computeTotals, fmtMoney, nextQuoteNo, type Line } from "@/lib/quote";
 import { describeChanges, type AuditSnap } from "@/lib/audit";
 import { invoiceNoOf, invoicePrefix, todayIST } from "@/lib/invoice";
+import { fullAddress } from "@/lib/quote-doc";
 import { adminOnly, authed } from "./auth.server";
 import { getDb } from "./env.server";
 import {
@@ -146,9 +147,44 @@ export const listCustomers = createServerFn({ method: "GET" })
   .middleware([authed])
   .handler(async () => (await getDb()).select().from(customers).orderBy(customers.name));
 
+const customerFields = {
+  name: text.min(1),
+  phone: opt,
+  address: opt,
+  gstin: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .max(15)
+    .transform((s) => s || null)
+    .nullable()
+    .optional(),
+  pan: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .max(10)
+    .transform((s) => s || null)
+    .nullable()
+    .optional(),
+  contact_person: opt,
+  email: z
+    .string()
+    .trim()
+    .max(200)
+    .transform((s) => s || null)
+    .nullable()
+    .optional(),
+  city: opt,
+  state: opt,
+  pincode: opt,
+  ship_to: opt,
+  notes: opt,
+};
+
 export const addCustomer = createServerFn({ method: "POST" })
   .middleware([authed])
-  .validator(z.object({ name: text.min(1), phone: opt, address: opt, gstin: opt }))
+  .validator(z.object(customerFields))
   .handler(async ({ data }) => {
     const [row] = await (await getDb()).insert(customers).values(data).returning();
     return row!;
@@ -156,20 +192,62 @@ export const addCustomer = createServerFn({ method: "POST" })
 
 export const updateCustomer = createServerFn({ method: "POST" })
   .middleware([authed])
+  // quoteId: set when edited from a quotation, so its history shows the change
+  .validator(z.object({ id: z.string(), quoteId: z.string().optional(), ...customerFields }))
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    const { id, quoteId, ...row } = data;
+    await db.update(customers).set(row).where(eq(customers.id, id));
+    if (quoteId)
+      await db.insert(quote_audit).values({
+        quote_id: quoteId,
+        by: context.user,
+        what: `Customer details edited (${row.name})`,
+      });
+    return { ok: true };
+  });
+
+// Point a quotation at another customer (or none), optionally creating the customer first.
+export const setQuoteCustomer = createServerFn({ method: "POST" })
+  .middleware([authed])
   .validator(
     z.object({
-      id: z.string(),
-      name: text.min(1),
-      phone: opt,
-      address: opt,
-      gstin: opt,
-      notes: opt,
+      quoteId: z.string(),
+      customerId: z.string().nullable(),
+      newCustomer: z.object(customerFields).nullable().default(null),
     }),
   )
-  .handler(async ({ data }) => {
-    const { id, ...row } = data;
-    await (await getDb()).update(customers).set(row).where(eq(customers.id, id));
-    return { ok: true };
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, data.quoteId));
+    if (!q) throw new Error("Quote not found");
+    let customerId = data.customerId;
+    if (!customerId && data.newCustomer) {
+      const [c] = await db
+        .insert(customers)
+        .values(data.newCustomer)
+        .returning({ id: customers.id });
+      if (!c) throw new Error("Could not create customer");
+      customerId = c.id;
+    }
+    const nameOf = async (cid: string | null) =>
+      cid
+        ? ((await db.select({ n: customers.name }).from(customers).where(eq(customers.id, cid)))[0]
+            ?.n ?? null)
+        : null;
+    const [from, to] = [await nameOf(q.customer_id), await nameOf(customerId)];
+    await db.batch([
+      db
+        .update(quotes)
+        .set({ customer_id: customerId, updated_at: new Date().toISOString() })
+        .where(eq(quotes.id, q.id)),
+      db.insert(quote_audit).values({
+        quote_id: q.id,
+        by: context.user,
+        what: `Customer ${from ?? "—"} → ${to ?? "—"}`,
+      }),
+    ]);
+    return { id: customerId };
   });
 
 // Quotes keep their history: the FK sets customer_id to null, so old quotes show "walk-in".
@@ -1013,7 +1091,7 @@ export const createInvoiceFromQuote = createServerFn({ method: "POST" })
             notes: q.notes,
             terms: q.terms,
             buyer_name: cust?.name ?? null,
-            buyer_address: cust?.address ?? null,
+            buyer_address: cust ? fullAddress(cust) : null,
             buyer_phone: cust?.phone ?? null,
             buyer_gstin: cust?.gstin ?? null,
             created_by: context.user,

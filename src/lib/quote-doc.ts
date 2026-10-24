@@ -55,6 +55,17 @@ export function validUntil(quoteDate: string, terms: string[]): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+// Street address plus "City, State 440016" as printed lines. Used on the Bill-to block and snapshotted on invoices.
+export function fullAddress(c: {
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+}): string | null {
+  const place = [[c.city, c.state].filter(Boolean).join(", "), c.pincode].filter(Boolean).join(" ");
+  return [c.address?.trim(), place].filter(Boolean).join("\n") || null;
+}
+
 // "2026-10-23" -> "23 Oct 2026"; anything else prints as stored.
 export function fmtDate(s: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);

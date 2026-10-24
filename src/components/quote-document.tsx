@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { UNIT_LABELS, computeTotals, fmtNum, inWords, lineWeight, type Line } from "@/lib/quote";
 import { pipeSpec, type PipeSpec } from "@/lib/pipe-spec";
-import { fmtAmt, fmtDate, stateOf, validUntil } from "@/lib/quote-doc";
+import { fmtAmt, fmtDate, fullAddress, stateOf, validUntil } from "@/lib/quote-doc";
 import { PipeSection } from "@/components/pipe-section";
 import type { getQuote } from "@/data/api";
 
@@ -18,6 +18,14 @@ export type DocData = {
     address: string | null;
     phone: string | null;
     gstin: string | null;
+    // quotations carry the full customer record; invoices snapshot only the four fields above
+    contact_person?: string | null;
+    email?: string | null;
+    city?: string | null;
+    state?: string | null;
+    pincode?: string | null;
+    pan?: string | null;
+    ship_to?: string | null;
   } | null;
   lines: Line[];
 };
@@ -79,7 +87,7 @@ export function QuoteDocument({
   const totalKg = lines.reduce((s, l) => s + (l.weightKg > 0 ? lineWeight(l) : 0), 0);
   const validTill = isInv ? null : validUntil(q.quote_date, termList);
   const placeOfSupply = stateOf(customer?.gstin) ?? stateOf(brand?.gstin);
-  const customerState = stateOf(customer?.gstin);
+  const customerState = stateOf(customer?.gstin) ?? customer?.state ?? null;
   const company = brand?.tagline?.replace(/^by\s+/i, "").trim() || "";
   const signFor = company || brand?.name;
   const hasPipes = specs.some(Boolean);
@@ -165,16 +173,25 @@ export function QuoteDocument({
                       {customer?.name ?? "—"}
                     </p>
                     <div className="mt-[0.5mm] text-[8.5pt] leading-snug">
-                      {customer?.address && (
-                        <p className="whitespace-pre-line">{customer.address}</p>
+                      {customer?.contact_person && <p>Attn: {customer.contact_person}</p>}
+                      {customer && fullAddress(customer) && (
+                        <p className="whitespace-pre-line">{fullAddress(customer)}</p>
                       )}
                       {customer?.phone && <p>Tel. {customer.phone}</p>}
+                      {customer?.email && <p>{customer.email}</p>}
                     </div>
-                    {(customer?.gstin || customerState) && (
+                    {(customer?.gstin || customer?.pan || customerState) && (
                       <dl className="mt-[1.5mm] grid grid-cols-[auto_1fr] gap-x-[3mm] text-[8.5pt]">
                         {customer?.gstin && <Field k="GSTIN" v={customer.gstin} />}
+                        {customer?.pan && <Field k="PAN" v={customer.pan} />}
                         {customerState && <Field k="State" v={customerState} />}
                       </dl>
+                    )}
+                    {customer?.ship_to && (
+                      <div className="mt-[2mm] border-t border-[var(--qd-line)] pt-[1.5mm] text-[8.5pt] leading-snug">
+                        <Label>Ship to</Label>
+                        <p className="mt-[0.5mm] whitespace-pre-line">{customer.ship_to}</p>
+                      </div>
                     )}
                   </div>
                   <dl className="grid grid-cols-[auto_1fr] content-start gap-x-[3mm] gap-y-[1mm] border-l border-[var(--qd-line)] bg-[var(--qd-soft)] p-[3mm] text-[8.5pt]">

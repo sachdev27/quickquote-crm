@@ -34,8 +34,10 @@ export function WeightExplainer({
     setT(0.5);
   }, [od, sdr, min, max]);
   const wall = min + (max - min) * t;
-  const stripLen = Math.PI * (od - wall); // length of the ring if cut open at its middle
-  const area = stripLen * wall; // mm²
+  const outerLen = Math.PI * od; // outside edge of the ring
+  const innerLen = Math.PI * (od - 2 * wall); // inside edge of the ring
+  const stripLen = Math.PI * (od - wall); // middle of the wall = average of the two edges
+  const area = stripLen * wall; // mm²: trapezoid area = average of the parallel sides × height
   const volume = area; // mm² × 1000 mm ÷ 1000 = cm³ for one metre
   const grams = volume * PE_DENSITY;
   const m = Number(metres) || 0;
@@ -76,11 +78,11 @@ export function WeightExplainer({
         ))}
       </ol>
 
-      <div className="grid gap-4 md:grid-cols-[minmax(0,15rem)_1fr] md:items-center">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,22rem)_1fr] md:items-center">
         {/* picture */}
         <svg
           viewBox="0 0 240 150"
-          className="mx-auto w-full max-w-[15rem]"
+          className="mx-auto w-full max-w-[22rem]"
           role="img"
           aria-label="Diagram"
         >
@@ -125,39 +127,55 @@ export function WeightExplainer({
           )}
           {step === 2 && (
             <g>
-              <text x="120" y="22" textAnchor="middle" fontSize="11" fill="#64748b">
+              <text x="120" y="16" textAnchor="middle" fontSize="11" fill="#64748b">
                 cut the ring open and lay it flat
               </text>
-              <rect x="10" y="50" width="220" height="30" rx="3" fill="#1e293b" />
+              {/* trapezoid: long outer edge on top, shorter inner edge below, wall as the height */}
+              <polygon points="10,44 230,44 207,84 33,84" fill="#1e293b" />
+              <line
+                x1="120"
+                y1="44"
+                x2="120"
+                y2="84"
+                stroke="#f97316"
+                strokeWidth="2"
+                strokeDasharray="3 2"
+              />
               <text
                 x="120"
-                y="45"
+                y="38"
                 textAnchor="middle"
                 fontSize="11"
                 fill="#0b4f7c"
                 fontWeight="600"
               >
-                length = π × ({od} − {at(wall)}) = {at(stripLen)} mm
+                outer edge = π × {od} = {at(outerLen)} mm
               </text>
               <text
                 x="120"
-                y="102"
+                y="100"
                 textAnchor="middle"
                 fontSize="11"
-                fill="#f97316"
+                fill="#0b4f7c"
                 fontWeight="600"
               >
-                thickness = {at(wall)} mm (drawn thicker)
+                inner edge = π × {at(od - 2 * wall)} = {at(innerLen)} mm
+              </text>
+              <text x="126" y="68" fontSize="10" fill="#fdba74" fontWeight="600">
+                wall {at(wall)} mm
+              </text>
+              <text x="120" y="122" textAnchor="middle" fontSize="11" fill="#475569">
+                average of the edges = {at(stripLen)} mm
               </text>
               <text
                 x="120"
-                y="130"
+                y="142"
                 textAnchor="middle"
                 fontSize="12"
                 fill="#334155"
                 fontWeight="700"
               >
-                area = {at(area)} mm²
+                area = {at(stripLen)} × {at(wall)} = {at(area)} mm²
               </text>
             </g>
           )}
@@ -276,18 +294,33 @@ export function WeightExplainer({
           {step === 2 && (
             <>
               <p>
-                The wall is a thin ring. Cut it open at its middle and lay it flat: it becomes a
-                strip.
+                Cut the ring open and lay it flat. It becomes a <b>trapezoid</b>, not a rectangle:
+                the outer edge of the ring is longer than the inner edge, and the wall is the height
+                between them.
               </p>
               <p>
-                Strip length = π × (OD − wall) = π × ({od} − {at(wall)}) = <b>{at(stripLen)} mm</b>
+                Outer edge = π × {od} = <b>{at(outerLen)} mm</b>
                 <br />
-                Strip thickness = wall = <b>{at(wall)} mm</b>
+                Inner edge = π × ({od} − 2 × {at(wall)}) = <b>{at(innerLen)} mm</b>
+                <br />
+                Height = wall = <b>{at(wall)} mm</b>
               </p>
               <p>
-                Area of plastic in the cross-section = {at(stripLen)} × {at(wall)} ={" "}
+                Area of a trapezoid = average of the two edges × height = (({at(outerLen)} +{" "}
+                {at(innerLen)}) ÷ 2) × {at(wall)} = {at(stripLen)} × {at(wall)} ={" "}
                 <b>{at(area)} mm²</b>
               </p>
+              <div className="rounded-xl bg-secondary p-3 text-[13px] leading-relaxed">
+                <p className="font-semibold">Why do we use the middle, π × (OD − wall)?</p>
+                <p>
+                  The average of the two edges is exactly the length around the <b>middle</b> of the
+                  wall: π × (OD − wall) = π × ({od} − {at(wall)}) = {at(stripLen)} mm. That is the
+                  same number. So we skip the two edges and use the middle in one step. The outside
+                  alone would be too long (it ignores that the ring is squeezed on the inside), and
+                  the inside alone would be too short. The middle is the fair share of both, which
+                  is why the answer is exact, not a guess.
+                </p>
+              </div>
             </>
           )}
           {step === 3 && (

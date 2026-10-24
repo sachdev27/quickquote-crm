@@ -36,6 +36,13 @@ export const customers = sqliteTable("customers", {
   address: text("address"),
   gstin: text("gstin"),
   notes: text("notes"),
+  contact_person: text("contact_person"),
+  email: text("email"),
+  city: text("city"),
+  state: text("state"),
+  pincode: text("pincode"),
+  pan: text("pan"),
+  ship_to: text("ship_to"),
   created_at: now(),
 });
 

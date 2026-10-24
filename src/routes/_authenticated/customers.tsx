@@ -19,6 +19,7 @@ import {
 } from "@/data/api";
 import { StatusPill } from "@/components/qq";
 import { STATUS_LABELS, fmtMoney } from "@/lib/quote";
+import { stateOf } from "@/lib/quote-doc";
 
 export const Route = createFileRoute("/_authenticated/customers")({
   validateSearch: (s: Record<string, unknown>): { id?: string } =>
@@ -34,8 +35,58 @@ type Form = {
   address: string;
   gstin: string;
   notes: string;
+  contact_person: string;
+  email: string;
+  pan: string;
+  city: string;
+  state: string;
+  pincode: string;
+  ship_to: string;
 };
-const EMPTY: Form = { name: "", phone: "", address: "", gstin: "", notes: "" };
+const EMPTY: Form = {
+  name: "",
+  phone: "",
+  address: "",
+  gstin: "",
+  notes: "",
+  contact_person: "",
+  email: "",
+  pan: "",
+  city: "",
+  state: "",
+  pincode: "",
+  ship_to: "",
+};
+// the whole customer record as form text (null -> "")
+const toForm = (c: {
+  id: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  gstin: string | null;
+  notes: string | null;
+  contact_person: string | null;
+  email: string | null;
+  pan: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  ship_to: string | null;
+}): Form => ({
+  id: c.id,
+  name: c.name,
+  phone: c.phone ?? "",
+  address: c.address ?? "",
+  gstin: c.gstin ?? "",
+  notes: c.notes ?? "",
+  contact_person: c.contact_person ?? "",
+  email: c.email ?? "",
+  pan: c.pan ?? "",
+  city: c.city ?? "",
+  state: c.state ?? "",
+  pincode: c.pincode ?? "",
+  ship_to: c.ship_to ?? "",
+});
 
 const wa = (p: string) => {
   const d = p.replace(/\D/g, "");
@@ -58,15 +109,7 @@ function Customers() {
     if (!search.id || !data) return;
     setSel(search.id);
     const c = data.find((x) => x.id === search.id);
-    if (c && typeof window !== "undefined" && window.innerWidth < 1024)
-      setF({
-        id: c.id,
-        name: c.name,
-        phone: c.phone ?? "",
-        address: c.address ?? "",
-        gstin: c.gstin ?? "",
-        notes: c.notes ?? "",
-      });
+    if (c && typeof window !== "undefined" && window.innerWidth < 1024) setF(toForm(c));
   }, [search.id, data]);
   const quotes = useQuery({ queryKey: ["quotes"], queryFn: () => listQuotes(), staleTime: 30_000 });
   const history = (id: string) => (quotes.data ?? []).filter((x) => x.customer_id === id);
@@ -94,7 +137,16 @@ function Customers() {
     `${c.name} ${c.phone ?? ""} ${c.gstin ?? ""}`.toLowerCase().includes(q.toLowerCase()),
   );
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    f && setF({ ...f, [k]: k === "gstin" ? e.target.value.toUpperCase() : e.target.value });
+    f &&
+    setF(
+      (() => {
+        const v = k === "gstin" || k === "pan" ? e.target.value.toUpperCase() : e.target.value;
+        const next = { ...f, [k]: v };
+        const st = (g: string) => stateOf(g)?.replace(/\s*\(\d+\)$/, "") ?? "";
+        if (k === "gstin" && (!f.state || f.state === st(f.gstin))) next.state = st(v) || f.state;
+        return next;
+      })(),
+    );
 
   return (
     <PageShell title="Customers" wide>
@@ -123,16 +175,7 @@ function Customers() {
             <button
               type="button"
               className="min-w-0 flex-1 text-left"
-              onClick={() =>
-                setF({
-                  id: c.id,
-                  name: c.name,
-                  phone: c.phone ?? "",
-                  address: c.address ?? "",
-                  gstin: c.gstin ?? "",
-                  notes: c.notes ?? "",
-                })
-              }
+              onClick={() => setF(toForm(c))}
             >
               <p className="truncate font-semibold">{c.name}</p>
               <p className="truncate text-sm text-muted-foreground">
@@ -224,16 +267,7 @@ function Customers() {
                     <Button
                       variant="outline"
                       className="h-9 rounded-lg"
-                      onClick={() =>
-                        setF({
-                          id: current.id,
-                          name: current.name,
-                          phone: current.phone ?? "",
-                          address: current.address ?? "",
-                          gstin: current.gstin ?? "",
-                          notes: current.notes ?? "",
-                        })
-                      }
+                      onClick={() => setF(toForm(current))}
                     >
                       Edit
                     </Button>
@@ -310,10 +344,17 @@ function Customers() {
           {f && (
             <form onSubmit={save} className="flex min-h-0 flex-col">
               <div className="space-y-3 overflow-y-auto px-4 pb-4">
-                <Field label="Name">
-                  <input value={f.name} onChange={set("name")} className={inputCls} />
-                </Field>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Company / customer name *">
+                    <input value={f.name} onChange={set("name")} className={inputCls} />
+                  </Field>
+                  <Field label="Contact person">
+                    <input
+                      value={f.contact_person}
+                      onChange={set("contact_person")}
+                      className={inputCls}
+                    />
+                  </Field>
                   <Field label="Phone">
                     <input
                       inputMode="tel"
@@ -322,12 +363,63 @@ function Customers() {
                       className={inputCls}
                     />
                   </Field>
+                  <Field label="Email">
+                    <input
+                      type="email"
+                      value={f.email}
+                      onChange={set("email")}
+                      className={inputCls}
+                    />
+                  </Field>
                   <Field label="GSTIN">
-                    <input value={f.gstin} onChange={set("gstin")} className={inputCls} />
+                    <input
+                      maxLength={15}
+                      value={f.gstin}
+                      onChange={set("gstin")}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="PAN">
+                    <input
+                      maxLength={10}
+                      value={f.pan}
+                      onChange={set("pan")}
+                      className={inputCls}
+                    />
                   </Field>
                 </div>
-                <Field label="Address">
-                  <input value={f.address} onChange={set("address")} className={inputCls} />
+                <Field label="Address (street, area)">
+                  <textarea
+                    value={f.address}
+                    onChange={set("address")}
+                    rows={2}
+                    className={`${inputCls} h-auto py-2`}
+                  />
+                </Field>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Field label="City / district">
+                    <input value={f.city} onChange={set("city")} className={inputCls} />
+                  </Field>
+                  <Field label="State">
+                    <input value={f.state} onChange={set("state")} className={inputCls} />
+                  </Field>
+                  <Field label="Pincode">
+                    <input
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={f.pincode}
+                      onChange={set("pincode")}
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+                <Field label="Ship to (only if different from the address)">
+                  <textarea
+                    value={f.ship_to}
+                    onChange={set("ship_to")}
+                    rows={2}
+                    className={`${inputCls} h-auto py-2`}
+                  />
                 </Field>
                 {f.id && <ContactsList customerId={f.id} />}
                 <Field label="Notes">
