@@ -2,6 +2,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   ArrowLeft,
   BarChart3,
+  Calculator,
   CalendarCheck,
   FileText,
   LayoutList,
@@ -20,6 +21,7 @@ const LINKS = [
   { to: "/insights", label: "Dashboard", Icon: BarChart3 },
   { to: "/invoices", label: "Invoices", Icon: FileText },
   { to: "/activities", label: "Activities", Icon: CalendarCheck },
+  { to: "/price-extractor", label: "Extractor", Icon: Calculator },
   { to: "/customers", label: "Customers", Icon: Users },
   { to: "/products", label: "Products", Icon: Tag },
   { to: "/settings", label: "Settings", Icon: Settings },
@@ -88,7 +90,9 @@ export function PageShell({
   const navigate = useNavigate();
   const active = useActive();
   const { isAdmin } = useMe();
-  const links = LINKS.filter((l) => isAdmin || l.to !== "/products");
+  const links = LINKS.filter(
+    (l) => isAdmin || (l.to !== "/products" && l.to !== "/price-extractor"),
+  );
   const navLink = (to: string, on: boolean) =>
     cn(
       "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium",

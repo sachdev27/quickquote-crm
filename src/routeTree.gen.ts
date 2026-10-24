@@ -16,6 +16,7 @@ import { Route as AuthenticatedCustomersRouteImport } from './routes/_authentica
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedInsightsRouteImport } from './routes/_authenticated/insights'
 import { Route as AuthenticatedNewQuoteRouteImport } from './routes/_authenticated/new-quote'
+import { Route as AuthenticatedPriceExtractorRouteImport } from './routes/_authenticated/price-extractor'
 import { Route as AuthenticatedPriceListRouteImport } from './routes/_authenticated/price-list'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
@@ -57,6 +58,12 @@ const AuthenticatedNewQuoteRoute = AuthenticatedNewQuoteRouteImport.update({
   path: '/new-quote',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedPriceExtractorRoute =
+  AuthenticatedPriceExtractorRouteImport.update({
+    id: '/price-extractor',
+    path: '/price-extractor',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedPriceListRoute = AuthenticatedPriceListRouteImport.update({
   id: '/price-list',
   path: '/price-list',
@@ -96,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/insights': typeof AuthenticatedInsightsRoute
   '/new-quote': typeof AuthenticatedNewQuoteRoute
+  '/price-extractor': typeof AuthenticatedPriceExtractorRoute
   '/price-list': typeof AuthenticatedPriceListRoute
   '/products': typeof AuthenticatedProductsRoute
   '/settings': typeof AuthenticatedSettingsRoute
@@ -110,6 +118,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/insights': typeof AuthenticatedInsightsRoute
   '/new-quote': typeof AuthenticatedNewQuoteRoute
+  '/price-extractor': typeof AuthenticatedPriceExtractorRoute
   '/price-list': typeof AuthenticatedPriceListRoute
   '/products': typeof AuthenticatedProductsRoute
   '/settings': typeof AuthenticatedSettingsRoute
@@ -126,6 +135,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/insights': typeof AuthenticatedInsightsRoute
   '/_authenticated/new-quote': typeof AuthenticatedNewQuoteRoute
+  '/_authenticated/price-extractor': typeof AuthenticatedPriceExtractorRoute
   '/_authenticated/price-list': typeof AuthenticatedPriceListRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
@@ -142,6 +152,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/insights'
     | '/new-quote'
+    | '/price-extractor'
     | '/price-list'
     | '/products'
     | '/settings'
@@ -156,6 +167,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/insights'
     | '/new-quote'
+    | '/price-extractor'
     | '/price-list'
     | '/products'
     | '/settings'
@@ -171,6 +183,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/insights'
     | '/_authenticated/new-quote'
+    | '/_authenticated/price-extractor'
     | '/_authenticated/price-list'
     | '/_authenticated/products'
     | '/_authenticated/settings'
@@ -235,6 +248,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedNewQuoteRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/price-extractor': {
+      id: '/_authenticated/price-extractor'
+      path: '/price-extractor'
+      fullPath: '/price-extractor'
+      preLoaderRoute: typeof AuthenticatedPriceExtractorRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/price-list': {
       id: '/_authenticated/price-list'
       path: '/price-list'
@@ -286,6 +306,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedInsightsRoute: typeof AuthenticatedInsightsRoute
   AuthenticatedNewQuoteRoute: typeof AuthenticatedNewQuoteRoute
+  AuthenticatedPriceExtractorRoute: typeof AuthenticatedPriceExtractorRoute
   AuthenticatedPriceListRoute: typeof AuthenticatedPriceListRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
@@ -300,6 +321,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedInsightsRoute: AuthenticatedInsightsRoute,
   AuthenticatedNewQuoteRoute: AuthenticatedNewQuoteRoute,
+  AuthenticatedPriceExtractorRoute: AuthenticatedPriceExtractorRoute,
   AuthenticatedPriceListRoute: AuthenticatedPriceListRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,

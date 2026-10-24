@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Calculator,
   Check,
   ChevronDown,
   Copy,
@@ -20,6 +21,7 @@ import { Card, Chips, Field, inputCls } from "@/components/qq";
 import { Switch } from "@/components/ui/switch";
 import { BulkHsn } from "@/components/bulk-hsn";
 import { Button } from "@/components/ui/button";
+import { PricePlayground } from "@/components/price-playground";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
 import {
@@ -99,7 +101,7 @@ type RateForm = {
   pct: boolean;
   isNewGroup: boolean;
 };
-type Tab = "pricing" | "weights" | "products";
+type Tab = "pricing" | "weights" | "products" | "playground";
 
 const n = (s: string) => Number(s) || 0;
 const parts = (r: Rate) =>
@@ -147,7 +149,15 @@ function ProductsAdmin() {
     queryFn: () => listProducts(),
     staleTime: 60_000,
   });
-  const [tab, setTab] = useState<Tab>("pricing");
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window !== "undefined") {
+      const q = new URLSearchParams(window.location.search).get("tab");
+      if (q === "playground" || q === "weights" || q === "products" || q === "pricing") {
+        return q as Tab;
+      }
+    }
+    return "pricing";
+  });
   const brands = useQuery({
     queryKey: ["brands"],
     queryFn: () => listBrands(),
@@ -467,12 +477,23 @@ function ProductsAdmin() {
       title="Products & pricing"
       wide
       actions={
-        <Link
-          to="/price-list"
-          className="inline-flex h-10 items-center gap-2 rounded-xl border border-border px-3 text-sm font-semibold"
-        >
-          <Printer className="h-4 w-4" /> <span className="hidden sm:inline">Price list</span>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant={tab === "playground" ? "default" : "outline"}
+            className="h-10 rounded-xl gap-1.5 font-semibold"
+            onClick={() => setTab("playground")}
+          >
+            <Calculator className="h-4 w-4" />
+            <span className="hidden sm:inline">Price extractor</span>
+          </Button>
+          <Link
+            to="/price-list"
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-border px-3 text-sm font-semibold"
+          >
+            <Printer className="h-4 w-4" /> <span className="hidden sm:inline">Price list</span>
+          </Link>
+        </div>
       }
     >
       <div className="mx-auto max-w-4xl space-y-4 lg:max-w-none lg:space-y-2">
@@ -487,6 +508,7 @@ function ProductsAdmin() {
             { value: "pricing", label: "Pricing" },
             { value: "weights", label: "Weight chart" },
             { value: "products", label: "Products" },
+            { value: "playground", label: "⚡ Price extractor" },
           ]}
         />
 
@@ -610,6 +632,17 @@ function ProductsAdmin() {
                 weight: "",
               })
             }
+          />
+        )}
+
+        {tab === "playground" && pricing.data && (
+          <PricePlayground
+            products={prods.data ?? []}
+            pricing={pricing.data}
+            brands={brands.data ?? []}
+            initialBrandId={viewBrand}
+            initialPresetId={presetId}
+            initialProfileId={profileId}
           />
         )}
       </div>
