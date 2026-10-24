@@ -238,13 +238,29 @@ function NewQuote() {
     return p?.size_mm && sdr ? pipeKgPerM(p.size_mm, sdr) : l.weightKg;
   };
   // pipes first, then sprinkler, then fittings (stable within each)
+  // Catalog pipes and sprinklers print the quote's brand in front; it follows the Brand selector.
+  const withQuoteBrand = (l: Line) => {
+    const cur = brandName(brandId);
+    if (!l.productId || !cur || (l.category !== "pipe" && l.category !== "sprinkler"))
+      return l.description;
+    let d = l.description;
+    for (const b of brands.data ?? [])
+      if (d.toLowerCase().startsWith(`${b.name.toLowerCase()} `)) d = d.slice(b.name.length + 1);
+    return `${cur} ${d}`;
+  };
   const rank = (c: string) => ["pipe", "sprinkler", "fitting"].indexOf(c);
   const priced: Draft[] = [...lines]
     .sort((a, b) => rank(a.category) - rank(b.category))
     .map((l) => {
       const weightKg = lineWeightKg(l);
       const rateKg = l.rateEdited || !l.rateGroupId ? l.rateKg : rateOf(l.rateGroupId, weightKg);
-      return { ...l, weightKg, rateKg, unitPrice: weightKg > 0 ? weightKg * rateKg : l.unitPrice };
+      return {
+        ...l,
+        description: withQuoteBrand(l),
+        weightKg,
+        rateKg,
+        unitPrice: weightKg > 0 ? weightKg * rateKg : l.unitPrice,
+      };
     });
   const totals = computeTotals(priced, num(extra), { inclusive: false, igst });
   // Roll length (m) of a pipe line: what the user set, else read from the description, else the product's.
@@ -413,7 +429,7 @@ function NewQuote() {
         productId: p.id,
         rateGroupId: p.rate_group_id,
         category: p.category as Category,
-        description: quoteTitle(p, brandName(p.brand_id || brandId)),
+        description: quoteTitle(p),
         hsn: p.hsn,
         unit: p.unit as Unit,
         qty: step,
@@ -562,7 +578,7 @@ function NewQuote() {
         productId: p.id,
         rateGroupId: p.rate_group_id,
         category: p.category as Category,
-        description: quoteTitle(p, brandName(p.brand_id || brandId)),
+        description: quoteTitle(p),
         hsn: p.hsn,
         unit: p.unit as Unit,
         qty,
@@ -1826,8 +1842,8 @@ function AddItemSheet({
       return void toast.error("This product has no weight. Set it under Products.");
     const desc =
       cat === "pipe" && !customLen
-        ? `${quoteTitle(sel, brandName(sel.brand_id || quoteBrandId))} · ${rolls} roll${rolls > 1 ? "s" : ""} × ${len} m`
-        : quoteTitle(sel, brandName(sel.brand_id || quoteBrandId));
+        ? `${quoteTitle(sel)} · ${rolls} roll${rolls > 1 ? "s" : ""} × ${len} m`
+        : quoteTitle(sel);
     onUseBrand(sel);
     onAdd({
       productId: sel.id,
