@@ -394,23 +394,28 @@ function NewQuote() {
     }
   }
 
-  // Keyboard: "/" jumps to quick add, Ctrl/Cmd+S saves.
+  // Keyboard: "/" or ⌘K / Ctrl+K jumps to quick add (here instead of the command palette);
+  // ⌘S / Ctrl+S or ⌘↵ / Ctrl+Enter saves.
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing =
         e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
-      if (e.key === "/" && !typing) {
+      const mod = e.metaKey || e.ctrlKey;
+      if ((e.key === "/" && !typing) || (mod && e.key.toLowerCase() === "k")) {
         e.preventDefault();
+        e.stopImmediatePropagation();
         quickRef.current?.focus();
-      } else if (e.key.toLowerCase() === "s" && (e.metaKey || e.ctrlKey)) {
+        quickRef.current?.select();
+      } else if (mod && (e.key.toLowerCase() === "s" || e.key === "Enter")) {
         e.preventDefault();
         saveRef.current();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // capture phase, so ⌘K reaches quick add before the global command palette
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
   const saveBtn = (
@@ -435,8 +440,37 @@ function NewQuote() {
     </Button>
   );
 
-  const addLine = (l: Line, quiet = false) => {
-    setLines((x) => [...x, normRoll({ ...l, key: crypto.randomUUID(), rateEdited: false })]);
+  // After an add from search or the catalog, the line's first field gets focus; Tab past its last field
+  // (or Enter) goes back to search.
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  // shortcut label: ⌘ on Apple devices, Ctrl elsewhere (set after mount, so SSR markup matches)
+  const [MOD, setMod] = useState("Ctrl ");
+  useEffect(() => setMod(/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl "), []);
+  useEffect(() => {
+    if (!focusKey) return;
+    const el = [...document.querySelectorAll<HTMLElement>(`[data-line="${focusKey}"]`)]
+      .find((r) => r.offsetParent !== null)
+      ?.querySelector<HTMLElement>("input, select");
+    el?.focus();
+    if (el instanceof HTMLInputElement) el.select();
+    setFocusKey(null);
+  }, [focusKey, lines]);
+  const lineKeys = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const fields = [...e.currentTarget.querySelectorAll<HTMLElement>("input, select")];
+    const last = e.target === fields[fields.length - 1];
+    if (
+      (e.key === "Enter" && e.target instanceof HTMLInputElement) ||
+      (e.key === "Tab" && !e.shiftKey && last)
+    ) {
+      e.preventDefault();
+      quickRef.current?.focus();
+    }
+  };
+  const addLine = (l: Line, quiet = false, focus = false) => {
+    const key = crypto.randomUUID();
+    setLines((x) => [...x, normRoll({ ...l, key, rateEdited: false })]);
+    if (focus) setFocusKey(key);
     if (!quiet) toast.success("Added", { duration: 1000 });
   };
   // Desktop catalog click: add the product, or bump its qty by one roll / step if it's already on the quote.
@@ -445,7 +479,10 @@ function NewQuote() {
       (p.roll_lengths ?? "").split("/").map(Number).find(Boolean) ?? (p.unit === "m" ? 100 : 10);
     const lb = p.brand_id || bid || brandId;
     const existing = lines.find((l) => l.productId === p.id && lineBrandId(l) === lb);
-    if (existing) return patch(existing.key, { qty: existing.qty + (rollLenOf(existing) || step) });
+    if (existing) {
+      setFocusKey(existing.key);
+      return patch(existing.key, { qty: existing.qty + (rollLenOf(existing) || step) });
+    }
     addLine(
       {
         productId: p.id,
@@ -461,6 +498,7 @@ function NewQuote() {
         unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, lb),
         gstRate: p.gst_rate,
       },
+      true,
       true,
     );
   };
@@ -599,7 +637,10 @@ function NewQuote() {
   function addFromCatalogQty(p: Product, qty: number, bid?: string) {
     const lb = p.brand_id || bid || brandId;
     const existing = lines.find((l) => l.productId === p.id && lineBrandId(l) === lb);
-    if (existing) return patch(existing.key, { qty: existing.qty + qty });
+    if (existing) {
+      setFocusKey(existing.key);
+      return patch(existing.key, { qty: existing.qty + qty });
+    }
     addLine(
       {
         productId: p.id,
@@ -615,6 +656,7 @@ function NewQuote() {
         unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, lb),
         gstRate: p.gst_rate,
       },
+      true,
       true,
     );
   }
@@ -833,7 +875,7 @@ function NewQuote() {
               onPick={(p) => addFromCatalog(p)}
               quoteBrandId={brandId}
               brandName={brandName}
-              onAddLine={(l) => addLine(l)}
+              onAddLine={(l) => addLine(l, false, true)}
               onMore={() => setSheet(true)}
               inQuote={
                 new Set(
@@ -862,6 +904,7 @@ function NewQuote() {
                       setQi(0);
                     }}
                     onKeyDown={(e) => {
+                      if (e.metaKey || e.ctrlKey) return;
                       if (e.key === "ArrowDown") {
                         e.preventDefault();
                         setQi((i) => Math.min(i + 1, suggestions.length - 1));
@@ -873,7 +916,7 @@ function NewQuote() {
                         quickAdd();
                       } else if (e.key === "Escape") setQuick("");
                     }}
-                    placeholder="Quick add: brand OD PN PE, qty: tarko 63 6 pe63 x2 · 90 8 300m · sprinkler x10   ( / )"
+                    placeholder={`Quick add: brand OD PN PE, qty: tarko 63 6 pe63 x2 · 90 8 300m · sprinkler x10   (${MOD}K)`}
                     className={`${inputCls} h-11 text-sm`}
                   />
                   {suggestions.length > 0 && (
@@ -926,7 +969,12 @@ function NewQuote() {
               {/* phone / tablet cards */}
               <div className="space-y-3 lg:hidden">
                 {priced.map((l) => (
-                  <div key={l.key} className="rounded-xl border border-border p-3">
+                  <div
+                    key={l.key}
+                    data-line={l.key}
+                    onKeyDown={lineKeys}
+                    className="rounded-xl border border-border p-3"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
@@ -1020,7 +1068,12 @@ function NewQuote() {
                     </thead>
                     <tbody>
                       {priced.map((l) => (
-                        <tr key={l.key} className="border-b border-border/60 align-middle">
+                        <tr
+                          key={l.key}
+                          data-line={l.key}
+                          onKeyDown={lineKeys}
+                          className="border-b border-border/60 align-middle"
+                        >
                           <td className="py-1.5 pr-2">
                             <p className="text-sm font-medium leading-tight">{l.description}</p>
                             <p className="text-xs text-muted-foreground">
