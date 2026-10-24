@@ -57,11 +57,15 @@ import { recall, remember } from "@/lib/utils";
 import { parseRoll, withRolls } from "@/lib/rolls";
 import { useIsDesktop } from "@/hooks/use-mobile";
 import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
+import { AI_DRAFT_KEY, type AiDraft } from "@/lib/ai/match";
 
 export const Route = createFileRoute("/_authenticated/new-quote")({
-  validateSearch: (s: Record<string, unknown>): { enquiry?: string; edit?: string } => ({
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { enquiry?: string; edit?: string; ai?: string } => ({
     ...(typeof s["enquiry"] === "string" ? { enquiry: s["enquiry"] } : {}),
     ...(typeof s["edit"] === "string" ? { edit: s["edit"] } : {}),
+    ...(typeof s["ai"] === "string" ? { ai: s["ai"] } : {}),
   }),
   head: () => ({ meta: [{ title: "New quote — Tarko CRM" }] }),
   component: NewQuote,
@@ -789,6 +793,30 @@ function NewQuote() {
     setPrefilled(true);
     toast.message(`Quoting enquiry: ${fromEnquiry.e.title}`);
   }, [fromEnquiry, customers.data, brands.data, prefilled]);
+
+  // Started from the AI page: customer, notes and matched lines wait in sessionStorage.
+  const aiMode = Route.useSearch().ai;
+  const [aiLoaded, setAiLoaded] = useState(false);
+  useEffect(() => {
+    if (!aiMode || aiLoaded || !prods.data || !brands.data || !customers.data || !brandId) return;
+    setAiLoaded(true);
+    let draft: AiDraft | null = null;
+    try {
+      draft = JSON.parse(sessionStorage.getItem(AI_DRAFT_KEY) ?? "null") as AiDraft | null;
+      sessionStorage.removeItem(AI_DRAFT_KEY);
+    } catch {
+      /* no draft */
+    }
+    if (!draft) return;
+    if (draft.customerName) onCustomer(draft.customerName);
+    if (draft.notes) setNotes(draft.notes);
+    for (const l of draft.lines) {
+      const p = prods.data.find((x) => x.id === l.productId);
+      if (p) addFromCatalogQty(p, l.qty, brandId);
+    }
+    toast.message("Draft from AI enquiry: check rates and quantities");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiMode, aiLoaded, prods.data, brands.data, customers.data, brandId]);
 
   useEffect(() => {
     const d = editing.data;

@@ -42,3 +42,14 @@ One-time setup:
    - `CLOUDFLARE_API_TOKEN` – the token from step 1
    - `CLOUDFLARE_ACCOUNT_ID` – shown in the Cloudflare dashboard (Workers & Pages, right sidebar)
 3. Optional: Settings → Environments → `production` → add required reviewers to approve each deploy.
+
+## AI Quote (enquiry → draft quote)
+
+`/ai-quote` reads a pasted email or an attached PDF/image, extracts the customer and product lines with an
+LLM, matches them to the catalog and opens a draft in the quote form. Prices always come from the CRM's
+pricing, never from the model.
+
+- Set the key: `npx wrangler secret put GEMINI_API_KEY` (production) or add `GEMINI_API_KEY=...` to `.dev.vars` (local).
+- Optional: `AI_MODEL` (default `gemini-3.5-flash-lite`) and `AI_PROVIDER` (default `gemini`).
+- Another vendor: implement `AiProvider` in `src/data/ai.server.ts` and register it in `PROVIDERS`.
+- Mailbox later: poll the inbox, build an `InboundMessage` (`src/lib/ai/inbound.ts`) and call the same pipeline.

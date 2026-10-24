@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { UNIT_LABELS, computeTotals, fmtNum, inWords, lineWeight, type Line } from "@/lib/quote";
-import { pipeSpec, type PipeSpec } from "@/lib/pipe-spec";
+import { pipeSpec } from "@/lib/pipe-spec";
 import { fmtAmt, fmtDate, fullAddress, stateOf, validUntil } from "@/lib/quote-doc";
 import { PipeSection } from "@/components/pipe-section";
 import { FittingDrawing } from "@/components/fitting-drawing";
@@ -241,7 +241,6 @@ export function QuoteDocument({
                             )}
                             <div className="min-w-0">
                               <p className="font-medium text-[var(--qd-ink)]">{l.description}</p>
-                              <SpecLine spec={specs[i]} />
                             </div>
                           </div>
                         </Td>
@@ -419,7 +418,7 @@ export function QuoteDocument({
                     <span>
                       Rates per unit, excluding GST.
                       {hasPipes &&
-                        " OD = outside diameter, ID = inside diameter (OD − 2 × minimum wall), Thickness = minimum–maximum wall, SDR = OD ÷ thickness (IS 4984); drawings not to scale."}{" "}
+                        " OD = outside diameter, ID = inside diameter (OD − 2 × minimum wall), Thickness = minimum–maximum wall (IS 4984); drawings not to scale."}{" "}
                       {isInv
                         ? "Computer-generated tax invoice."
                         : "Computer-generated proforma, not a tax invoice; prices subject to confirmation on order."}
@@ -439,12 +438,6 @@ export function QuoteDocument({
       </article>
     </A4Frame>
   );
-}
-
-// Quiet lines under the description. OD / ID / thickness are written on the drawing itself.
-function SpecLine({ spec }: { spec: PipeSpec | null | undefined }) {
-  const sdr = spec?.sdr ? `SDR ${fmtNum(spec.sdr, 1)}` : "";
-  return sdr ? <p className="text-[7.5pt] text-[var(--qd-accent)]">{sdr}</p> : null;
 }
 
 const Th = ({ children, className = "" }: { children?: ReactNode; className?: string }) => (
