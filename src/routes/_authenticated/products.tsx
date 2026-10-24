@@ -1451,8 +1451,10 @@ const FIELD_LABELS = {
   raw_kg_non_isi: "Raw (non-ISI)",
   production_kg: "Production",
   transport_kg: "Transport",
+  coupler: "Coupler (sprinkler)",
   margin: "Profit margin",
 } as const;
+// "coupler" is the sprinkler rate's transport column (₹ per piece for the bought-in coupler)
 type BulkField = keyof typeof FIELD_LABELS;
 
 // Change one variable across many grades × presets at once, e.g. raw material +₹5 everywhere.
@@ -1485,30 +1487,40 @@ function BulkSheet({
   }, [open, pricing]);
   const toggle = (xs: string[], x: string) =>
     xs.includes(x) ? xs.filter((y) => y !== x) : [...xs, x];
+  // Transport never touches sprinkler (that column is its coupler); Coupler touches only sprinkler.
+  const gradeItems =
+    field === "coupler"
+      ? pricing.groups.filter((g) => g.id === SPRINKLER_GROUP)
+      : field === "transport_kg"
+        ? pricing.groups.filter((g) => g.id !== SPRINKLER_GROUP)
+        : pricing.groups;
+  const chosenGroups = groups.filter((g) => gradeItems.some((x) => x.id === g));
   const unit =
-    field === "margin"
-      ? marginType === "pct"
-        ? "%"
-        : marginType === "flat"
-          ? "₹/kg"
-          : "(% or ₹/kg, per each rate's margin type)"
-      : "₹/kg";
+    field === "coupler"
+      ? "₹/piece"
+      : field === "margin"
+        ? marginType === "pct"
+          ? "%"
+          : marginType === "flat"
+            ? "₹/kg"
+            : "(% or ₹/kg, per each rate's margin type)"
+        : "₹/kg";
 
   async function apply() {
     const v = Number(value);
     if (value === "" || !isFinite(v)) return void toast.error("Enter a number");
-    if (!presets.length || !groups.length)
+    if (!presets.length || !chosenGroups.length)
       return void toast.error("Pick at least one preset and grade");
     try {
       const { updated } = await bulkUpdateRates({
         data: {
           profileId,
-          field,
+          field: field === "coupler" ? "transport_kg" : field,
           mode,
           value: v,
           ...(field === "margin" && marginType ? { marginType } : {}),
           presetIds: presets,
-          groupIds: groups,
+          groupIds: chosenGroups,
         },
       });
       onDone();
@@ -1600,10 +1612,16 @@ function BulkSheet({
               className={inputCls}
             />
           </Field>
+          {(field === "production_kg" || field === "margin") &&
+            chosenGroups.includes(SPRINKLER_GROUP) && (
+              <p className="-mt-2 text-xs text-muted-foreground">
+                For Sprinkler pipe this value is ₹ per piece.
+              </p>
+            )}
           {(
             [
               ["Presets", pricing.presets, presets, setPresets],
-              ["Grades", pricing.groups, groups, setGroups],
+              ["Grades", gradeItems, chosenGroups, setGroups],
             ] as const
           ).map(([label, items, sel, set]) => (
             <div key={label}>
@@ -1629,7 +1647,7 @@ function BulkSheet({
             {mode === "add"
               ? `${FIELD_LABELS[field]} ${Number(value) >= 0 ? "+" : ""}${value || "0"}`
               : `Set ${FIELD_LABELS[field]} = ${value || "0"}`}{" "}
-            · {presets.length * groups.length} rates
+            · {presets.length * chosenGroups.length} rates
           </Button>
         </div>
       </DrawerContent>
