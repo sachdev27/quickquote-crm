@@ -2,6 +2,27 @@ import { unzipSync, strFromU8 } from "fflate";
 
 export const MAX_TEXT_CHARS = 40_000;
 
+// Office files are zips, so a small upload can inflate enormously. Limits are checked from the
+// declared sizes before anything is decompressed, and while text is built, not after.
+const MAX_ENTRY_BYTES = 5 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 15 * 1024 * 1024;
+const MAX_SHEETS = 10;
+const MAX_ROWS = 5000;
+const MAX_COLS = 256;
+
+function safeUnzip(bytes: Uint8Array, wanted: (name: string) => boolean) {
+  let total = 0;
+  return unzipSync(bytes, {
+    filter: (f) => {
+      if (!wanted(f.name)) return false;
+      total += f.originalSize;
+      if (f.originalSize > MAX_ENTRY_BYTES || total > MAX_TOTAL_BYTES)
+        throw new Error("The file is too large once unpacked");
+      return true;
+    },
+  });
+}
+
 // What a file turns into before it reaches the model: PDFs, photos and voice notes go straight to
 // Gemini; Word, Excel and plain-text style files are read to text here (Gemini cannot open them).
 export type FileKind = "inline" | "docx" | "xlsx" | "text";
@@ -62,7 +83,7 @@ const textRuns = (xml: string) =>
     .join("");
 
 export function docxToText(bytes: Uint8Array): string {
-  const files = unzipSync(bytes, { filter: (f) => f.name === "word/document.xml" });
+  const files = safeUnzip(bytes, (n) => n === "word/document.xml");
   const xml = files["word/document.xml"];
   if (!xml) throw new Error("That does not look like a .docx file");
   return strFromU8(xml)
@@ -77,10 +98,10 @@ const colIndex = (ref: string) =>
   [...(/^[A-Z]+/.exec(ref)?.[0] ?? "A")].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0) - 1;
 
 export function xlsxToText(bytes: Uint8Array): string {
-  const files = unzipSync(bytes, {
-    filter: (f) =>
-      f.name === "xl/sharedStrings.xml" || /^xl\/worksheets\/sheet\d+\.xml$/.test(f.name),
-  });
+  const files = safeUnzip(
+    bytes,
+    (n) => n === "xl/sharedStrings.xml" || /^xl\/worksheets\/sheet\d+\.xml$/.test(n),
+  );
   const shared = [
     ...strFromU8(files["xl/sharedStrings.xml"] ?? new Uint8Array()).matchAll(
       /<si>([\s\S]*?)<\/si>/g,
@@ -88,11 +109,13 @@ export function xlsxToText(bytes: Uint8Array): string {
   ].map((m) => textRuns(m[1] ?? ""));
   const sheets = Object.keys(files)
     .filter((n) => n.startsWith("xl/worksheets/"))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .slice(0, MAX_SHEETS);
   if (!sheets.length) throw new Error("That does not look like an .xlsx file");
   return sheets
     .map((name, si) => {
       const rows: string[] = [];
+      let chars = 0;
       for (const r of strFromU8(files[name]!).matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
         const cells: string[] = [];
         for (const c of (r[1] ?? "").matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
@@ -107,12 +130,15 @@ export function xlsxToText(bytes: Uint8Array): string {
               : type === "inlineStr"
                 ? textRuns(body)
                 : decode(v ?? "");
-          cells[colIndex(ref)] = val;
+          const col = colIndex(ref);
+          if (col < MAX_COLS) cells[col] = val;
         }
         const line = Array.from(cells, (x) => x ?? "")
           .join("\t")
           .trimEnd();
         if (line) rows.push(line);
+        chars += line.length;
+        if (rows.length >= MAX_ROWS || chars > MAX_TEXT_CHARS) break;
       }
       return `--- Sheet ${si + 1} ---\n${rows.join("\n")}`;
     })

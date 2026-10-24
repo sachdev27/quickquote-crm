@@ -32,3 +32,13 @@ describe("office readers", () => {
     );
   });
 });
+
+describe("office reader limits", () => {
+  it("refuses zip bombs and ignores absurd column refs", () => {
+    const big = zipSync({ "word/document.xml": new Uint8Array(6 * 1024 * 1024) });
+    expect(() => docxToText(big)).toThrow(/too large/);
+    const sheet = `<worksheet><sheetData><row r="1"><c r="XFD1" t="n"><v>1</v></c><c r="A1" t="n"><v>2</v></c></row></sheetData></worksheet>`;
+    const zip = zipSync({ "xl/worksheets/sheet1.xml": strToU8(sheet) });
+    expect(xlsxToText(zip)).toBe("--- Sheet 1 ---\n2");
+  });
+});
