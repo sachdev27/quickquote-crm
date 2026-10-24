@@ -18,6 +18,7 @@ import { Chips, StatusPill, inputCls, inputSm } from "@/components/qq";
 import { KanbanBoard } from "@/components/kanban-board";
 import { STATUS_LABELS, fmtMoney, type Stage } from "@/lib/quote";
 import {
+  deleteQuote,
   getQuote,
   listEnquiries,
   listFollowUps,
@@ -129,6 +130,17 @@ function Dashboard() {
       await setQuoteStatus({ data: { id, status: stage } });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not move");
+    }
+    qc.invalidateQueries({ queryKey: ["quotes"] });
+  }
+  async function removeQuote(id: string) {
+    const r = all.find((x) => x.id === id);
+    if (!confirm(`Delete ${r?.quote_no ?? "this quote"}? This can't be undone.`)) return;
+    try {
+      await deleteQuote({ data: { id } });
+      toast.success(`${r?.quote_no ?? "Quote"} deleted`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete");
     }
     qc.invalidateQueries({ queryKey: ["quotes"] });
   }
@@ -348,6 +360,7 @@ function Dashboard() {
           followUps={follow.data ?? []}
           brand={brand}
           onMove={move}
+          onDelete={removeQuote}
           onOpenEnquiry={(e) => setEnqOpen({ e })}
           onNewEnquiry={() => setEnqOpen({ e: null })}
           onConvert={convert}

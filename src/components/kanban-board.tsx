@@ -7,6 +7,7 @@ import {
   FilePlus2,
   MoreHorizontal,
   Plus,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -67,6 +68,7 @@ export function KanbanBoard({
   followUps,
   brand,
   onMove,
+  onDelete,
   onOpenEnquiry,
   onNewEnquiry,
   onConvert,
@@ -77,6 +79,7 @@ export function KanbanBoard({
   followUps: FollowUp[];
   brand: string; // "all" or a brand name (chosen in the page toolbar)
   onMove: (id: string, s: Stage) => void;
+  onDelete: (id: string) => void;
   onOpenEnquiry: (e: Enq) => void;
   onNewEnquiry: () => void;
   onConvert: (id: string) => void;
@@ -217,6 +220,13 @@ export function KanbanBoard({
                 <span className={`mr-2 size-2 rounded-full ${DOT[s]}`} /> {STATUS_LABELS[s]}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => onDelete(r.id)}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Delete quote
+            </DropdownMenuItem>
           </>,
         )}
       </div>
