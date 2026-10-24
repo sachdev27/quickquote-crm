@@ -1276,7 +1276,7 @@ function NewQuote() {
                                       sub: !r
                                         ? "not set"
                                         : c.id === SPRINKLER_GROUP
-                                          ? `+₹${fmtNum(r.production_kg + r.margin)}/pc`
+                                          ? `+₹${fmtNum(r.production_kg + r.transport_kg + r.margin)}/pc`
                                           : `₹${fmtNum(ratePerKg(withBrandRaw(r, brandRawFor(c.id)), nonIsi))}/kg`,
                                     };
                                   })}
@@ -1313,17 +1313,19 @@ function NewQuote() {
                                     className={inputCls}
                                   />
                                 </Field>
-                                {c.id !== SPRINKLER_GROUP && (
-                                  <Field label="Transport ₹/kg">
-                                    <input
-                                      inputMode="decimal"
-                                      value={f.transport}
-                                      onFocus={(e) => e.currentTarget.select()}
-                                      onChange={set("transport")}
-                                      className={inputCls}
-                                    />
-                                  </Field>
-                                )}
+                                <Field
+                                  label={
+                                    c.id === SPRINKLER_GROUP ? "Coupler ₹/pc" : "Transport ₹/kg"
+                                  }
+                                >
+                                  <input
+                                    inputMode="decimal"
+                                    value={f.transport}
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    onChange={set("transport")}
+                                    className={inputCls}
+                                  />
+                                </Field>
                                 <Field
                                   label={
                                     c.id === SPRINKLER_GROUP
@@ -1342,7 +1344,8 @@ function NewQuote() {
                               </div>
                               {c.id === SPRINKLER_GROUP ? (
                                 <p className="text-xs text-muted-foreground">
-                                  Price per piece = raw × piece weight + production + margin.
+                                  Price per piece = raw × piece weight + production + coupler +
+                                  margin.
                                 </p>
                               ) : (
                                 <p className="text-xs text-muted-foreground tabular-nums">

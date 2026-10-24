@@ -64,13 +64,13 @@ export function ratePerKg(r: Rate, nonIsi = false): number {
   return r.margin_is_pct ? cost * (1 + r.margin / 100) : cost + r.margin;
 }
 
-// Sprinkler pipe is priced per piece: raw ₹/kg × the brand's piece weight + production ₹ + margin ₹ (both flat
-// per piece, stored in production_kg and margin of the SPRINKLER rate). Returned as the equivalent ₹/kg
-// so a line stays weight × rate.
+// Sprinkler pipe is priced per piece: raw ₹/kg × the brand's piece weight + production ₹ + coupler ₹ + margin ₹
+// (all flat per piece, stored in production_kg, transport_kg and margin of the SPRINKLER rate; the coupler is
+// bought in and fitted in-house). Returned as the equivalent ₹/kg so a line stays weight × rate.
 export const SPRINKLER_GROUP = "SPRINKLER";
 export function sprinklerPrice(r: Rate, weightKg: number, nonIsi = false): number {
   const raw = nonIsi && r.raw_kg_non_isi != null ? r.raw_kg_non_isi : r.raw_kg;
-  return raw * weightKg + r.production_kg + r.margin;
+  return raw * weightKg + r.production_kg + r.transport_kg + r.margin;
 }
 export const sprinklerRateKg = (r: Rate, weightKg: number, nonIsi = false) =>
   weightKg > 0 ? sprinklerPrice(r, weightKg, nonIsi) / weightKg : 0;

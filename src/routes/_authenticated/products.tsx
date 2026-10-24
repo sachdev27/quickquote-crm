@@ -240,7 +240,7 @@ function ProductsAdmin() {
     });
   };
 
-  // Sprinkler pipe is priced per piece: raw × weight + production ₹ + margin ₹ (both flat).
+  // Sprinkler pipe is priced per piece: raw × weight + production + coupler + margin (flat ₹ each).
   const isSprinkler = card?.group.toUpperCase() === SPRINKLER_GROUP;
   const sample = sprinklerSample;
   const sprinklerRaw = brandRawOf(SPRINKLER_GROUP)?.raw_kg ?? n(card?.raw ?? "");
@@ -257,7 +257,7 @@ function ProductsAdmin() {
           raw_kg: n(card.raw),
           raw_kg_non_isi: card.rawNonIsi.trim() === "" ? null : n(card.rawNonIsi),
           production_kg: n(card.production),
-          transport_kg: isSprinkler ? 0 : n(card.transport),
+          transport_kg: n(card.transport),
           margin: n(card.margin),
           margin_is_pct: isSprinkler ? false : card.pct,
         },
@@ -623,7 +623,7 @@ function ProductsAdmin() {
         </div>
         {prod.rate_group_id === "SPRINKLER" &&
           (() => {
-            // sprinkler pipe: ₹ per piece = raw ₹/kg × piece weight + production ₹ + margin ₹ (both flat per piece)
+            // sprinkler pipe: ₹ per piece = raw ₹/kg × piece weight + production + coupler + margin (flat per piece)
             const r = rateRow(presetId, "SPRINKLER");
             if (!r) return null;
             const b = prod.brand_id
@@ -640,8 +640,11 @@ function ProductsAdmin() {
                   ? `, ${brands.data?.find((x) => x.id === prod.brand_id)?.name ?? ""} raw`
                   : ""}
                 ): raw ₹{fmtNum(raw)}/kg × {fmtNum(w, 3)} kg = {fmtMoney(raw * w)} + production{" "}
-                {fmtMoney(r.production_kg)} + margin {fmtMoney(r.margin)} ={" "}
-                <b className="text-foreground">{fmtMoney(raw * w + r.production_kg + r.margin)}</b>{" "}
+                {fmtMoney(r.production_kg)} + coupler {fmtMoney(r.transport_kg)} + margin{" "}
+                {fmtMoney(r.margin)} ={" "}
+                <b className="text-foreground">
+                  {fmtMoney(raw * w + r.production_kg + r.transport_kg + r.margin)}
+                </b>{" "}
                 per piece. Change these under Pricing.
               </p>
             );
@@ -924,17 +927,15 @@ function ProductsAdmin() {
                     className={inputCls}
                   />
                 </Field>
-                {!isSprinkler && (
-                  <Field label="Transport ₹/kg">
-                    <input
-                      inputMode="decimal"
-                      value={card.transport}
-                      onFocus={(e) => e.currentTarget.select()}
-                      onChange={(e) => setCard({ ...card, transport: e.target.value })}
-                      className={inputCls}
-                    />
-                  </Field>
-                )}
+                <Field label={isSprinkler ? "Coupler ₹/piece (bought in)" : "Transport ₹/kg"}>
+                  <input
+                    inputMode="decimal"
+                    value={card.transport}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onChange={(e) => setCard({ ...card, transport: e.target.value })}
+                    className={inputCls}
+                  />
+                </Field>
                 <Field label={`Profit margin ${isSprinkler ? "₹/piece" : card.pct ? "%" : "₹/kg"}`}>
                   <input
                     inputMode="decimal"
@@ -958,15 +959,18 @@ function ProductsAdmin() {
               )}
               {isSprinkler ? (
                 <p className="rounded-xl bg-secondary px-4 py-3 text-sm text-muted-foreground tabular-nums">
-                  Price per piece = raw × piece weight + production + margin. Raw is the brand's
-                  price on the right ({fmtNum(sprinklerRaw)}/kg).
+                  Price per piece = raw × piece weight + production + coupler + margin. Raw is the
+                  brand's price on the right ({fmtNum(sprinklerRaw)}/kg).
                   {sample && (
                     <>
                       <br />
                       {sample.name} ({fmtNum(sample.weight_kg, 3)} kg) ={" "}
                       <b className="text-foreground">
                         {fmtMoney(
-                          sprinklerRaw * sample.weight_kg + n(card.production) + n(card.margin),
+                          sprinklerRaw * sample.weight_kg +
+                            n(card.production) +
+                            n(card.transport) +
+                            n(card.margin),
                         )}
                       </b>
                     </>
@@ -1389,14 +1393,14 @@ function PricingGrid({
                                   {g.id === SPRINKLER_GROUP
                                     ? sprinklerSample
                                       ? `${fmtMoney(sprinklerPrice(r, sprinklerSample.weight_kg))}/pc`
-                                      : `+${fmtMoney(r.production_kg + r.margin)}/pc`
+                                      : `+${fmtMoney(r.production_kg + r.transport_kg + r.margin)}/pc`
                                     : fmtMoney(ratePerKg(r))}
                                 </span>
                                 <span
                                   className={`block text-[10px] ${r.brandApplied ? "font-semibold text-primary" : "text-muted-foreground"}`}
                                 >
                                   {g.id === SPRINKLER_GROUP
-                                    ? `${sprinklerSample ? `${fmtNum(r.raw_kg)} × ${fmtNum(sprinklerSample.weight_kg)} kg` : "raw × wt"} + ${fmtNum(r.production_kg)} + ${fmtNum(r.margin)}`
+                                    ? `${sprinklerSample ? `${fmtNum(r.raw_kg)} × ${fmtNum(sprinklerSample.weight_kg)} kg` : "raw × wt"} + ${fmtNum(r.production_kg)} + ${fmtNum(r.transport_kg)} + ${fmtNum(r.margin)}`
                                     : parts(r)}
                                   {r.brandApplied && " · brand raw"}
                                 </span>

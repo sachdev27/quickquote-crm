@@ -55,3 +55,19 @@ describe("splitFittingName", () => {
     });
   });
 });
+
+import { sprinklerPrice } from "@/lib/quote";
+describe("sprinklerPrice", () => {
+  it("adds production, the bought-in coupler and margin per piece", () => {
+    const r = {
+      raw_kg: 70,
+      raw_kg_non_isi: 65,
+      production_kg: 100,
+      transport_kg: 30,
+      margin: 80,
+      margin_is_pct: 0,
+    };
+    expect(sprinklerPrice(r, 3.2)).toBe(70 * 3.2 + 100 + 30 + 80);
+    expect(sprinklerPrice(r, 3.2, true)).toBe(65 * 3.2 + 100 + 30 + 80);
+  });
+});
