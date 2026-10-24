@@ -2646,6 +2646,12 @@ function SprinklerCard({
   );
 }
 
+const pnLabel = (p: Pick<Product, "pn">) => (p.pn ? String(pnNumber(p.pn) || p.pn) : "—");
+const rollLabel = (p: Pick<Product, "roll" | "roll_lengths">) =>
+  p.roll === "cut" ? "cut" : p.roll_lengths ? `${p.roll_lengths} m` : "—";
+const colInput =
+  "h-8 w-full min-w-[4.5rem] rounded-md border border-input bg-background px-2 text-xs font-normal normal-case tracking-normal text-foreground outline-none focus:border-primary";
+
 function ProductList({
   products,
   loading,
@@ -2673,6 +2679,9 @@ function ProductList({
 }) {
   const [cat, setCat] = useState<"all" | Category>("all");
   const [q, setQ] = useState("");
+  // Per-column filters in the table header ("" = any).
+  const [colF, setColF] = useState({ name: "", grade: "", pn: "", roll: "", hsn: "" });
+  const colActive = Object.values(colF).some(Boolean);
   const [withGst, setWithGst] = useState(false);
   const [view, setView] = useState<"list" | "matrix">("list");
   const [sel, setSel] = useState<Set<string>>(new Set()); // ticked products (list view)
@@ -2720,6 +2729,13 @@ function ProductList({
     }
   }
 
+  const matchesCols = (p: Product) =>
+    (!colF.name ||
+      `${p.name} ${p.size_mm ?? ""}`.toLowerCase().includes(colF.name.toLowerCase())) &&
+    (!colF.grade || (p.grade ?? "—") === colF.grade) &&
+    (!colF.pn || pnLabel(p) === colF.pn) &&
+    (!colF.roll || rollLabel(p) === colF.roll) &&
+    (!colF.hsn || (p.hsn ?? "—") === colF.hsn);
   const sections = useMemo(() => {
     const m = new Map<string, Product[]>();
     for (const p of products) {
@@ -2729,11 +2745,17 @@ function ProductList({
         !`${p.name} ${p.size_mm ?? ""} ${p.grade ?? ""}`.toLowerCase().includes(q.toLowerCase())
       )
         continue;
+      if (!matchesCols(p)) continue;
       const k = sectionOf(p);
       m.set(k, [...(m.get(k) ?? []), p]);
     }
     return [...m.entries()];
-  }, [products, cat, q]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- matchesCols reads colF
+  }, [products, cat, q, colF]);
+  // dropdown choices come from what's in the current category
+  const inCat = products.filter((p) => cat === "all" || p.category === cat);
+  const choices = (f: (p: Product) => string) =>
+    [...new Set(inCat.map(f))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   // Selection: only products that still exist count (they vanish after a delete).
   const visibleIds = sections.flatMap(([, items]) => items.map((p) => p.id));
@@ -3021,7 +3043,8 @@ function ProductList({
                 (p) =>
                   p.category !== "fitting" &&
                   (cat === "all" || p.category === cat) &&
-                  (!q || `${p.name} ${p.size_mm ?? ""}`.toLowerCase().includes(q.toLowerCase())),
+                  (!q || `${p.name} ${p.size_mm ?? ""}`.toLowerCase().includes(q.toLowerCase())) &&
+                  matchesCols(p),
               )}
               rateOf={rateOf}
               withGst={withGst}
@@ -3052,6 +3075,58 @@ function ProductList({
                         </th>
                       ))}
                     </tr>
+                    <tr className="border-b border-border">
+                      <th className="py-1.5" />
+                      <th className="py-1.5 pr-3">
+                        <input
+                          aria-label="Filter product"
+                          value={colF.name}
+                          onChange={(e) => setColF({ ...colF, name: e.target.value })}
+                          placeholder="Filter…"
+                          className={colInput}
+                        />
+                      </th>
+                      {(
+                        [
+                          ["grade", "Grade", (p: Product) => p.grade ?? "—"],
+                          ["pn", "PN", pnLabel],
+                          ["roll", "Roll", rollLabel],
+                          ["hsn", "HSN/SAC", (p: Product) => p.hsn ?? "—"],
+                        ] as const
+                      ).map(([k, label, f]) => (
+                        <th key={k} className="px-2 py-1.5">
+                          <select
+                            aria-label={`Filter ${label}`}
+                            value={colF[k]}
+                            onChange={(e) => setColF({ ...colF, [k]: e.target.value })}
+                            className={`${colInput} ${colF[k] ? "border-primary text-primary" : ""}`}
+                          >
+                            <option value="">All</option>
+                            {choices(f).map((v) => (
+                              <option key={v} value={v}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
+                        </th>
+                      ))}
+                      <th
+                        colSpan={1 + (pricing?.presets.length ?? 0)}
+                        className="px-2 py-1.5 text-right"
+                      >
+                        {colActive && (
+                          <button
+                            type="button"
+                            className="text-xs font-semibold normal-case text-primary hover:underline"
+                            onClick={() =>
+                              setColF({ name: "", grade: "", pn: "", roll: "", hsn: "" })
+                            }
+                          >
+                            Clear filters · {visibleIds.length} shown
+                          </button>
+                        )}
+                      </th>
+                    </tr>
                   </thead>
                   <tbody>
                     {sections.map(([title, items]) => (
@@ -3081,13 +3156,9 @@ function ProductList({
                             </td>
                             <td className="py-1.5 pr-3 text-sm font-medium">{shortName(p)}</td>
                             <td className="px-2 text-sm">{p.grade ?? "—"}</td>
-                            <td className="px-2 text-sm">{p.pn ? pnNumber(p.pn) || p.pn : "—"}</td>
+                            <td className="px-2 text-sm">{pnLabel(p)}</td>
                             <td className="whitespace-nowrap px-2 text-sm text-muted-foreground">
-                              {p.roll === "cut"
-                                ? "cut"
-                                : p.roll_lengths
-                                  ? `${p.roll_lengths} m`
-                                  : "—"}
+                              {rollLabel(p)}
                             </td>
                             <td className="whitespace-nowrap px-2 text-sm text-muted-foreground">
                               {p.hsn ?? "—"}
