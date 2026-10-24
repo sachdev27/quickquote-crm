@@ -110,9 +110,18 @@ function ActivitiesPage() {
   const today = day();
   const all = tasks.data ?? [];
   const openTasks = useMemo(() => all.filter((t) => !t.a.done), [all]);
-  const overdueTasks = useMemo(() => openTasks.filter((t) => (t.a.due_date ?? "") < today), [openTasks, today]);
-  const todayTasks = useMemo(() => openTasks.filter((t) => t.a.due_date === today), [openTasks, today]);
-  const upcomingTasks = useMemo(() => openTasks.filter((t) => (t.a.due_date ?? "") > today), [openTasks, today]);
+  const overdueTasks = useMemo(
+    () => openTasks.filter((t) => (t.a.due_date ?? "") < today),
+    [openTasks, today],
+  );
+  const todayTasks = useMemo(
+    () => openTasks.filter((t) => t.a.due_date === today),
+    [openTasks, today],
+  );
+  const upcomingTasks = useMemo(
+    () => openTasks.filter((t) => (t.a.due_date ?? "") > today),
+    [openTasks, today],
+  );
   const doneTasks = useMemo(() => all.filter((t) => t.a.done), [all]);
 
   // Filtering
@@ -180,12 +189,24 @@ function ActivitiesPage() {
 
   // Grouped breakdown for grouped board view
   const groupedSections: [string, Task[], string][] = [
-    ["Overdue", overdueTasks, "text-rose-600 bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900"],
-    ["Today", todayTasks, "text-amber-600 bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900"],
+    [
+      "Overdue",
+      overdueTasks,
+      "text-rose-600 bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900",
+    ],
+    [
+      "Today",
+      todayTasks,
+      "text-amber-600 bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900",
+    ],
     ["Upcoming", upcomingTasks, "text-foreground bg-secondary/40 border-border"],
     ...(filterStatus === "all" || filterStatus === "done"
       ? ([
-          ["Completed (Last 30 Days)", doneTasks.slice(0, 50), "text-muted-foreground bg-secondary/20 border-border"],
+          [
+            "Completed (Last 30 Days)",
+            doneTasks.slice(0, 50),
+            "text-muted-foreground bg-secondary/20 border-border",
+          ],
         ] as [string, Task[], string][])
       : []),
   ];
@@ -203,7 +224,9 @@ function ActivitiesPage() {
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-rose-600">Overdue</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-rose-600">
+              Overdue
+            </span>
             <AlertCircle className="h-4 w-4 text-rose-600" />
           </div>
           <p className="mt-1 text-2xl font-bold tabular-nums text-rose-700 dark:text-rose-400">
@@ -221,7 +244,9 @@ function ActivitiesPage() {
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-amber-600">Due Today</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-amber-600">
+              Due Today
+            </span>
             <Clock className="h-4 w-4 text-amber-600" />
           </div>
           <p className="mt-1 text-2xl font-bold tabular-nums text-amber-700 dark:text-amber-400">
@@ -239,7 +264,9 @@ function ActivitiesPage() {
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-foreground">Upcoming</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+              Upcoming
+            </span>
             <Calendar className="h-4 w-4 text-primary" />
           </div>
           <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">
@@ -257,7 +284,9 @@ function ActivitiesPage() {
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600">Completed</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600">
+              Completed
+            </span>
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
           </div>
           <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
@@ -315,8 +344,7 @@ function ActivitiesPage() {
               onChange={(e) => setForm({ ...form, due: e.target.value })}
               className={`${inputCls} text-xs sm:w-36`}
               aria-label="Due date"
-            >
-            </input>
+            ></input>
             <div className="flex gap-2">
               <Button className="h-10 rounded-xl px-4 text-xs font-semibold" onClick={add}>
                 <Plus className="mr-1 h-3.5 w-3.5" /> Save
@@ -467,7 +495,11 @@ function ActivitiesPage() {
                     <div className="flex items-center gap-1.5">
                       <span>Task Description</span>
                       {sortField === "text" ? (
-                        sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                        sortAsc ? (
+                          <ArrowUp className="h-3 w-3 text-primary" />
+                        ) : (
+                          <ArrowDown className="h-3 w-3 text-primary" />
+                        )
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-40" />
                       )}
@@ -480,7 +512,11 @@ function ActivitiesPage() {
                     <div className="flex items-center gap-1.5">
                       <span>Customer</span>
                       {sortField === "customer" ? (
-                        sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                        sortAsc ? (
+                          <ArrowUp className="h-3 w-3 text-primary" />
+                        ) : (
+                          <ArrowDown className="h-3 w-3 text-primary" />
+                        )
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-40" />
                       )}
@@ -493,7 +529,11 @@ function ActivitiesPage() {
                     <div className="flex items-center gap-1.5">
                       <span>Due Date</span>
                       {sortField === "due_date" ? (
-                        sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                        sortAsc ? (
+                          <ArrowUp className="h-3 w-3 text-primary" />
+                        ) : (
+                          <ArrowDown className="h-3 w-3 text-primary" />
+                        )
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-40" />
                       )}
@@ -536,7 +576,9 @@ function ActivitiesPage() {
                       <td className="px-3 py-3">
                         <span
                           className={`text-sm ${
-                            isDone ? "line-through text-muted-foreground" : "font-semibold text-foreground"
+                            isDone
+                              ? "line-through text-muted-foreground"
+                              : "font-semibold text-foreground"
                           }`}
                         >
                           {t.a.text || "Follow up"}
@@ -671,7 +713,9 @@ function ActivitiesPage() {
           {groupedSections.map(([title, items, tone]) =>
             items.length ? (
               <Card key={title} className="overflow-hidden">
-                <div className={`-mx-4 -mt-4 mb-3 px-4 py-2 border-b text-xs font-bold uppercase tracking-wider ${tone}`}>
+                <div
+                  className={`-mx-4 -mt-4 mb-3 px-4 py-2 border-b text-xs font-bold uppercase tracking-wider ${tone}`}
+                >
                   {title} · {items.length}
                 </div>
                 <ul className="divide-y divide-border/60">
@@ -682,13 +726,17 @@ function ActivitiesPage() {
                         aria-label={t.a.done ? "Mark not done" : "Mark done"}
                         onClick={() => toggle(t)}
                         className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
-                          t.a.done ? "border-emerald-600 bg-emerald-600 text-white" : "border-border hover:border-primary"
+                          t.a.done
+                            ? "border-emerald-600 bg-emerald-600 text-white"
+                            : "border-border hover:border-primary"
                         }`}
                       >
                         {t.a.done ? <Check className="h-3.5 w-3.5" /> : null}
                       </button>
                       <div className="min-w-0 flex-1">
-                        <p className={`text-sm ${t.a.done ? "text-muted-foreground line-through" : "font-medium"}`}>
+                        <p
+                          className={`text-sm ${t.a.done ? "text-muted-foreground line-through" : "font-medium"}`}
+                        >
                           {t.a.text || "Follow up"}
                         </p>
                         <p className="text-xs text-muted-foreground">
