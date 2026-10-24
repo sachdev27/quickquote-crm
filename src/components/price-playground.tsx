@@ -44,9 +44,9 @@ interface PricePlaygroundProps {
   products: Product[];
   pricing: Pricing;
   brands: Brand[];
-  initialBrandId?: string;
-  initialPresetId?: string;
-  initialProfileId?: string;
+  initialBrandId?: string | undefined;
+  initialPresetId?: string | undefined;
+  initialProfileId?: string | undefined;
 }
 
 const COMMON_ODS = [20, 25, 32, 40, 50, 63, 75, 90, 110, 125, 140, 160, 200, 250, 280, 315];
