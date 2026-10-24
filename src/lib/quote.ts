@@ -85,6 +85,8 @@ export interface Line {
   rateGroupId: string | null;
   category: Category;
   description: string;
+  // catalog pipes/sprinklers: the brand whose raw price and name apply to this line (client-side only)
+  brandId?: string;
   hsn: string | null;
   unit: Unit;
   qty: number;
