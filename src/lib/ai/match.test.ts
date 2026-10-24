@@ -52,4 +52,15 @@ describe("extractionSchema", () => {
     });
     expect(e.items[0]).toMatchObject({ kind: "other", od_mm: 63, qty: 2, unit: null });
   });
+  it("normalises unit wordings", () => {
+    const u = (unit: string) =>
+      extractionSchema.parse({ items: [{ raw: "r", unit }] }).items[0]!.unit;
+    expect([u("mtr"), u("Coils"), u("nos"), u("KGS"), u("box")]).toEqual([
+      "m",
+      "rolls",
+      "pc",
+      "kg",
+      null,
+    ]);
+  });
 });

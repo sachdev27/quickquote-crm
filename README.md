@@ -50,6 +50,6 @@ LLM, matches them to the catalog and opens a draft in the quote form. Prices alw
 pricing, never from the model.
 
 - Set the key: `npx wrangler secret put GEMINI_API_KEY` (production) or add `GEMINI_API_KEY=...` to `.dev.vars` (local).
-- Optional: `AI_MODEL` (default `gemini-2.5-flash`) and `AI_PROVIDER` (default `gemini`).
+- Optional: `AI_MODEL` (default `gemini-3.5-flash-lite`) and `AI_PROVIDER` (default `gemini`).
 - Another vendor: implement `AiProvider` in `src/data/ai.server.ts` and register it in `PROVIDERS`.
 - Mailbox later: poll the inbox, build an `InboundMessage` (`src/lib/ai/inbound.ts`) and call the same pipeline.

@@ -25,6 +25,17 @@ const num = z.preprocess(
 );
 const str = z.preprocess((v) => (v == null || v === "" ? null : String(v)), z.string().nullable());
 
+// Models answer "mtr", "coil", "nos"...; fold the common wordings into our four units.
+function normUnit(v: unknown) {
+  if (typeof v !== "string") return null;
+  const u = v.toLowerCase().trim();
+  if (/^(m|mt|mtr|mtrs|meter|meters|metre|metres|mts)$/.test(u)) return "m";
+  if (/^(roll|rolls|coil|coils|bundle|bundles)$/.test(u)) return "rolls";
+  if (/^(pc|pcs|piece|pieces|no|nos|number|numbers|unit|units)$/.test(u)) return "pc";
+  if (/^(kg|kgs|kilogram|kilograms)$/.test(u)) return "kg";
+  return null;
+}
+
 export const extractionSchema = z.object({
   customer: z
     .object({ name: str, company: str, phone: str, email: str, gstin: str })
@@ -39,7 +50,10 @@ export const extractionSchema = z.object({
         pn: num.default(null),
         grade: str.default(null),
         qty: num.default(null),
-        unit: z.enum(["m", "rolls", "pc", "kg"]).nullable().catch(null).default(null),
+        unit: z
+          .preprocess(normUnit, z.enum(["m", "rolls", "pc", "kg"]).nullable())
+          .catch(null)
+          .default(null),
         brand: str.default(null),
       }),
     )

@@ -15,7 +15,7 @@ const gemini = (env: Env): AiProvider => ({
     const key = env.GEMINI_API_KEY;
     if (!key)
       throw new Error("GEMINI_API_KEY is not set (add it as a Worker secret / in .dev.vars)");
-    const model = env.AI_MODEL || "gemini-2.5-flash";
+    const model = env.AI_MODEL || "gemini-3.5-flash-lite";
     const head = [
       message.subject && `Subject: ${message.subject}`,
       message.from && `From: ${message.from}`,
@@ -26,18 +26,22 @@ const gemini = (env: Env): AiProvider => ({
       { text: [head, message.text].filter(Boolean).join("\n\n") || "(see attached file)" },
       ...message.attachments.map((a) => ({ inline_data: { mime_type: a.mime, data: a.base64 } })),
     ];
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0 },
-        }),
-      },
-    );
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const init = {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0 },
+      }),
+    };
+    // 429/503 are Google's "busy" answers; two quick retries clear most of them
+    let res = await fetch(url, init);
+    for (let i = 0; i < 2 && (res.status === 503 || res.status === 429); i++) {
+      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+      res = await fetch(url, init);
+    }
     if (!res.ok) throw new Error(`Gemini error ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const body = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
