@@ -362,6 +362,7 @@ function ProductsAdmin() {
           hsn: p.hsn ?? null,
           size_mm: p.size_mm ?? null,
           brand_id: p.category === "sprinkler" ? (p.brand_id ?? null) : null,
+          length_m: p.category === "sprinkler" ? (p.length_m ?? null) : null,
           unit: (p.unit ?? "pc") as Unit,
           weight_kg: n(p.weight),
           gst_rate: p.gst_rate ?? 18,
@@ -474,6 +475,22 @@ function ProductsAdmin() {
               className={inputCls}
             />
           </Field>
+          {prod.category === "sprinkler" && (
+            <Field label="Length (m)">
+              <input
+                inputMode="decimal"
+                list="sprinkler-lengths"
+                value={prod.length_m ?? ""}
+                onChange={(e) => setProd({ ...prod, length_m: Number(e.target.value) || null })}
+                placeholder="6"
+                className={inputCls}
+              />
+              <datalist id="sprinkler-lengths">
+                <option value="6" />
+                <option value="12" />
+              </datalist>
+            </Field>
+          )}
           <Field label="Inch (trade size)">
             <input
               value={prod.inch ?? ""}
