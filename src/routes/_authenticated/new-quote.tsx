@@ -395,7 +395,7 @@ function NewQuote() {
     }
   }
 
-  // Keyboard: "/" or ⌘K / Ctrl+K jumps to quick add (here instead of the command palette);
+  // Keyboard: ⌥C / Alt+C jumps to the customer; "/" or ⌘K / Ctrl+K jumps to quick add (here instead of the command palette);
   // ⌘S / Ctrl+S or ⌘↵ / Ctrl+Enter saves.
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -404,6 +404,13 @@ function NewQuote() {
       const typing =
         e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
       const mod = e.metaKey || e.ctrlKey;
+      // Alt/Option+C: customer (by key position, since Option+C types "ç" on a Mac)
+      if (e.altKey && !mod && e.code === "KeyC") {
+        e.preventDefault();
+        custRef.current?.focus();
+        custRef.current?.select();
+        return;
+      }
       if ((e.key === "/" && !typing) || (mod && e.key.toLowerCase() === "k")) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -446,7 +453,13 @@ function NewQuote() {
   const [focusKey, setFocusKey] = useState<string | null>(null);
   // shortcut label: ⌘ on Apple devices, Ctrl elsewhere (set after mount, so SSR markup matches)
   const [MOD, setMod] = useState("Ctrl ");
-  useEffect(() => setMod(/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl "), []);
+  const [ALT, setAlt] = useState("Alt+");
+  useEffect(() => {
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+    setMod(mac ? "⌘" : "Ctrl ");
+    setAlt(mac ? "⌥" : "Alt+");
+  }, []);
+  const custRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!focusKey) return;
     const el = [...document.querySelectorAll<HTMLElement>(`[data-line="${focusKey}"]`)]
@@ -763,11 +776,18 @@ function NewQuote() {
         <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2.2fr)_repeat(5,minmax(0,1fr))]">
           <div className="sm:col-span-2 lg:col-span-1">
             <input
+              ref={custRef}
               list="customer-list"
               aria-label="Customer"
-              placeholder="Customer: type name or phone (blank = walk-in)"
+              placeholder={`Customer: type name or phone (blank = walk-in)   (${ALT}C)`}
               value={custText}
               onChange={(e) => onCustomer(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter: customer done, on to the items
+                // (after a tick, so Enter can still pick a highlighted suggestion first)
+                if (e.key === "Enter" && !e.metaKey && !e.ctrlKey)
+                  setTimeout(() => quickRef.current?.focus(), 0);
+              }}
               className={`${inputCls} h-11`}
             />
             <datalist id="customer-list">
