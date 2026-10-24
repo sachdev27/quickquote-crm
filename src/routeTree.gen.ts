@@ -15,6 +15,7 @@ import { Route as AuthenticatedActivitiesRouteImport } from './routes/_authentic
 import { Route as AuthenticatedAiQuoteRouteImport } from './routes/_authenticated/ai-quote'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedGmailCallbackRouteImport } from './routes/_authenticated/gmail-callback'
 import { Route as AuthenticatedInsightsRouteImport } from './routes/_authenticated/insights'
 import { Route as AuthenticatedNewQuoteRouteImport } from './routes/_authenticated/new-quote'
 import { Route as AuthenticatedPriceExtractorRouteImport } from './routes/_authenticated/price-extractor'
@@ -54,6 +55,12 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedGmailCallbackRoute =
+  AuthenticatedGmailCallbackRouteImport.update({
+    id: '/gmail-callback',
+    path: '/gmail-callback',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedInsightsRoute = AuthenticatedInsightsRouteImport.update({
   id: '/insights',
   path: '/insights',
@@ -108,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/ai-quote': typeof AuthenticatedAiQuoteRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/gmail-callback': typeof AuthenticatedGmailCallbackRoute
   '/insights': typeof AuthenticatedInsightsRoute
   '/new-quote': typeof AuthenticatedNewQuoteRoute
   '/price-extractor': typeof AuthenticatedPriceExtractorRoute
@@ -124,6 +132,7 @@ export interface FileRoutesByTo {
   '/ai-quote': typeof AuthenticatedAiQuoteRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/gmail-callback': typeof AuthenticatedGmailCallbackRoute
   '/insights': typeof AuthenticatedInsightsRoute
   '/new-quote': typeof AuthenticatedNewQuoteRoute
   '/price-extractor': typeof AuthenticatedPriceExtractorRoute
@@ -142,6 +151,7 @@ export interface FileRoutesById {
   '/_authenticated/ai-quote': typeof AuthenticatedAiQuoteRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/gmail-callback': typeof AuthenticatedGmailCallbackRoute
   '/_authenticated/insights': typeof AuthenticatedInsightsRoute
   '/_authenticated/new-quote': typeof AuthenticatedNewQuoteRoute
   '/_authenticated/price-extractor': typeof AuthenticatedPriceExtractorRoute
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/ai-quote'
     | '/customers'
     | '/dashboard'
+    | '/gmail-callback'
     | '/insights'
     | '/new-quote'
     | '/price-extractor'
@@ -176,6 +187,7 @@ export interface FileRouteTypes {
     | '/ai-quote'
     | '/customers'
     | '/dashboard'
+    | '/gmail-callback'
     | '/insights'
     | '/new-quote'
     | '/price-extractor'
@@ -193,6 +205,7 @@ export interface FileRouteTypes {
     | '/_authenticated/ai-quote'
     | '/_authenticated/customers'
     | '/_authenticated/dashboard'
+    | '/_authenticated/gmail-callback'
     | '/_authenticated/insights'
     | '/_authenticated/new-quote'
     | '/_authenticated/price-extractor'
@@ -251,6 +264,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/gmail-callback': {
+      id: '/_authenticated/gmail-callback'
+      path: '/gmail-callback'
+      fullPath: '/gmail-callback'
+      preLoaderRoute: typeof AuthenticatedGmailCallbackRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/insights': {
@@ -324,6 +344,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAiQuoteRoute: typeof AuthenticatedAiQuoteRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedGmailCallbackRoute: typeof AuthenticatedGmailCallbackRoute
   AuthenticatedInsightsRoute: typeof AuthenticatedInsightsRoute
   AuthenticatedNewQuoteRoute: typeof AuthenticatedNewQuoteRoute
   AuthenticatedPriceExtractorRoute: typeof AuthenticatedPriceExtractorRoute
@@ -340,6 +361,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAiQuoteRoute: AuthenticatedAiQuoteRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedGmailCallbackRoute: AuthenticatedGmailCallbackRoute,
   AuthenticatedInsightsRoute: AuthenticatedInsightsRoute,
   AuthenticatedNewQuoteRoute: AuthenticatedNewQuoteRoute,
   AuthenticatedPriceExtractorRoute: AuthenticatedPriceExtractorRoute,

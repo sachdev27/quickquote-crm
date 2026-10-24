@@ -4,16 +4,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy, FileUp, Loader2, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/bottom-nav";
+import { GmailInbox } from "@/components/gmail-inbox";
 import { Button } from "@/components/ui/button";
 import { listProducts } from "@/data/api";
 import { extractEnquiry } from "@/data/ai";
-import {
-  ACCEPTED_MIME,
-  MAX_FILE_BYTES,
-  type ExtractedItem,
-  type Extraction,
-} from "@/lib/ai/inbound";
+import { MAX_FILE_BYTES, type ExtractedItem, type Extraction } from "@/lib/ai/inbound";
 import { AI_DRAFT_KEY, matchItem, quoteQty, replyDraft, type AiDraft } from "@/lib/ai/match";
+import { ACCEPT_EXT, classify } from "@/lib/ai/files";
 import { pnNumber } from "@/lib/weights";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +54,20 @@ function AiQuotePage() {
   const [notes, setNotes] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState<"paste" | "gmail">("paste");
+  const [from, setFrom] = useState<string | null>(null);
+
+  const applyExtraction = (extraction: Extraction) => {
+    setCustomer(extraction.customer);
+    setNotes(extraction.notes);
+    setRows(
+      extraction.items.map((item) => {
+        const m = matchItem(item, products);
+        return { item, productId: m.status === "matched" ? m.candidates[0]!.id : "" };
+      }),
+    );
+    if (!extraction.items.length) toast.message("No product lines found in that enquiry");
+  };
 
   const run = useMutation({
     mutationFn: async () => {
@@ -65,24 +76,15 @@ function AiQuotePage() {
       );
       return extractEnquiry({ data: { source: "upload", text, attachments } });
     },
-    onSuccess: ({ extraction }) => {
-      setCustomer(extraction.customer);
-      setNotes(extraction.notes);
-      setRows(
-        extraction.items.map((item) => {
-          const m = matchItem(item, products);
-          return { item, productId: m.status === "matched" ? m.candidates[0]!.id : "" };
-        }),
-      );
-      if (!extraction.items.length) toast.message("No product lines found in that enquiry");
-    },
+    onSuccess: ({ extraction }) => applyExtraction(extraction),
     onError: (e) => toast.error(e instanceof Error ? e.message : "Extraction failed"),
   });
 
-  const addFiles = (list: FileList | null) => {
+  const addFiles = (list: FileList | File[] | null) => {
     const ok: File[] = [];
     for (const f of Array.from(list ?? [])) {
-      if (!ACCEPTED_MIME.includes(f.type)) toast.error(`${f.name}: use a PDF, image or .txt`);
+      if (!classify(f.name, f.type))
+        toast.error(`${f.name}: use PDF, image, audio, Word, Excel, CSV or text`);
       else if (f.size > MAX_FILE_BYTES)
         toast.error(`${f.name}: over ${MAX_FILE_BYTES / 1048576} MB`);
       else ok.push(f);
@@ -146,63 +148,105 @@ function AiQuotePage() {
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <Sparkles className="h-4 w-4 text-primary" /> Customer enquiry
           </h2>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={9}
-            placeholder="Paste the email or message here. Signatures and quoted replies are ignored."
-            className="w-full rounded-lg border border-input bg-background p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-          />
-          <div
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              addFiles(e.dataTransfer.files);
-            }}
-            className="rounded-xl border border-dashed border-border p-3 text-center text-sm text-muted-foreground"
-          >
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="inline-flex items-center gap-2 font-medium text-primary"
-            >
-              <FileUp className="h-4 w-4" /> Attach PDF, image or text
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              multiple
-              hidden
-              accept={ACCEPTED_MIME.join(",")}
-              onChange={(e) => {
-                addFiles(e.target.files);
-                e.target.value = "";
+          <div className="flex gap-1 rounded-lg bg-secondary p-1 text-sm">
+            {(["paste", "gmail"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={cn(
+                  "flex-1 rounded-md px-3 py-1.5 font-medium",
+                  tab === t ? "bg-background shadow-sm" : "text-muted-foreground",
+                )}
+              >
+                {t === "paste" ? "Paste / upload" : "Gmail inbox"}
+              </button>
+            ))}
+          </div>
+          {tab === "gmail" ? (
+            <GmailInbox
+              onExtracted={(r) => {
+                applyExtraction(r.extraction);
+                setFrom(
+                  `${r.subject}${r.files.length ? ` (+${r.files.length} file${r.files.length > 1 ? "s" : ""})` : ""}`,
+                );
               }}
             />
-            <p className="mt-1 text-xs">Up to 3 files, 6 MB each. You can also drop them here.</p>
-          </div>
-          {files.map((f, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between rounded-lg bg-secondary px-3 py-1.5 text-sm"
-            >
-              <span className="truncate">{f.name}</span>
-              <button
-                aria-label={`Remove ${f.name}`}
-                onClick={() => setFiles((x) => x.filter((_, j) => j !== i))}
+          ) : (
+            <>
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onPaste={(e) => {
+                  const imgs = Array.from(e.clipboardData.files).filter((f) =>
+                    f.type.startsWith("image/"),
+                  );
+                  if (imgs.length) {
+                    e.preventDefault();
+                    addFiles(imgs);
+                  }
+                }}
+                rows={9}
+                placeholder="Paste an email, WhatsApp message or chat here (or paste a screenshot). Signatures and chatter are ignored."
+                className="w-full rounded-lg border border-input bg-background p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  addFiles(e.dataTransfer.files);
+                }}
+                className="rounded-xl border border-dashed border-border p-3 text-center text-sm text-muted-foreground"
               >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
-          <Button className="w-full" disabled={!canRun} onClick={() => run.mutate()}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {busy ? "Reading enquiry…" : "Extract items"}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            The AI only reads the enquiry. Products are matched to your catalog and rates come from
-            your pricing, never from the AI.
-          </p>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="inline-flex items-center gap-2 font-medium text-primary"
+                >
+                  <FileUp className="h-4 w-4" /> Attach PDF, image, Word, Excel, audio…
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  multiple
+                  hidden
+                  accept={ACCEPT_EXT}
+                  onChange={(e) => {
+                    addFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                <p className="mt-1 text-xs">
+                  Up to 3 files, 6 MB each. You can also drop them here.
+                </p>
+              </div>
+              {files.map((f, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between rounded-lg bg-secondary px-3 py-1.5 text-sm"
+                >
+                  <span className="truncate">{f.name}</span>
+                  <button
+                    aria-label={`Remove ${f.name}`}
+                    onClick={() => setFiles((x) => x.filter((_, j) => j !== i))}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+              <Button className="w-full" disabled={!canRun} onClick={() => run.mutate()}>
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {busy ? "Reading enquiry…" : "Extract items"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                The AI only reads the enquiry. Products are matched to your catalog and rates come
+                from your pricing, never from the AI.
+              </p>
+            </>
+          )}
         </section>
 
         <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -232,6 +276,7 @@ function AiQuotePage() {
                   />
                 </label>
               </div>
+              {from && <p className="text-xs text-muted-foreground">From email: {from}</p>}
               {notes && <p className="rounded-lg bg-secondary px-3 py-2 text-xs">Notes: {notes}</p>}
 
               <ul className="divide-y divide-border">

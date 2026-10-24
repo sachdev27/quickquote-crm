@@ -11,6 +11,11 @@ export interface Env {
   GEMINI_API_KEY?: string;
   AI_PROVIDER?: string;
   AI_MODEL?: string;
+  // Gmail inbox for AI quotes (secrets): OAuth client from Google Cloud, internal Workspace app
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GMAIL_ACCOUNT?: string; // the only mailbox that may be connected (default sales@tarko.in)
+  GMAIL_LABEL?: string; // label shown to non-admins (default Quotes)
 }
 
 let envP: Promise<Env> | undefined;
