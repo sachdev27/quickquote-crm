@@ -7,13 +7,9 @@ import { PageShell } from "@/components/bottom-nav";
 import { Button } from "@/components/ui/button";
 import { listProducts } from "@/data/api";
 import { extractEnquiry } from "@/data/ai";
-import {
-  ACCEPTED_MIME,
-  MAX_FILE_BYTES,
-  type ExtractedItem,
-  type Extraction,
-} from "@/lib/ai/inbound";
+import { MAX_FILE_BYTES, type ExtractedItem, type Extraction } from "@/lib/ai/inbound";
 import { AI_DRAFT_KEY, matchItem, quoteQty, replyDraft, type AiDraft } from "@/lib/ai/match";
+import { ACCEPT_EXT, classify } from "@/lib/ai/files";
 import { pnNumber } from "@/lib/weights";
 import { cn } from "@/lib/utils";
 
@@ -79,10 +75,11 @@ function AiQuotePage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Extraction failed"),
   });
 
-  const addFiles = (list: FileList | null) => {
+  const addFiles = (list: FileList | File[] | null) => {
     const ok: File[] = [];
     for (const f of Array.from(list ?? [])) {
-      if (!ACCEPTED_MIME.includes(f.type)) toast.error(`${f.name}: use a PDF, image or .txt`);
+      if (!classify(f.name, f.type))
+        toast.error(`${f.name}: use PDF, image, audio, Word, Excel, CSV or text`);
       else if (f.size > MAX_FILE_BYTES)
         toast.error(`${f.name}: over ${MAX_FILE_BYTES / 1048576} MB`);
       else ok.push(f);
@@ -149,8 +146,17 @@ function AiQuotePage() {
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onPaste={(e) => {
+              const imgs = Array.from(e.clipboardData.files).filter((f) =>
+                f.type.startsWith("image/"),
+              );
+              if (imgs.length) {
+                e.preventDefault();
+                addFiles(imgs);
+              }
+            }}
             rows={9}
-            placeholder="Paste the email or message here. Signatures and quoted replies are ignored."
+            placeholder="Paste an email, WhatsApp message or chat here (or paste a screenshot). Signatures and chatter are ignored."
             className="w-full rounded-lg border border-input bg-background p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
           />
           <div
@@ -166,14 +172,14 @@ function AiQuotePage() {
               onClick={() => fileRef.current?.click()}
               className="inline-flex items-center gap-2 font-medium text-primary"
             >
-              <FileUp className="h-4 w-4" /> Attach PDF, image or text
+              <FileUp className="h-4 w-4" /> Attach PDF, image, Word, Excel, audio…
             </button>
             <input
               ref={fileRef}
               type="file"
               multiple
               hidden
-              accept={ACCEPTED_MIME.join(",")}
+              accept={ACCEPT_EXT}
               onChange={(e) => {
                 addFiles(e.target.files);
                 e.target.value = "";

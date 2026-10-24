@@ -65,7 +65,7 @@ export function getProvider(env: Env): AiProvider {
 }
 
 export const EXTRACT_SYSTEM = `You read customer enquiries for an Indian HDPE pipe, sprinkler and fittings manufacturer and turn them into structured data.
-The input may be an email (with signatures, disclaimers, quoted replies, forwards), a PDF, a photo of a handwritten or printed list, or a WhatsApp-style message. Ignore everything that is not part of the customer's request.
+The input can be anything a customer sends: an email (with signatures, disclaimers, quoted replies, forwards), a WhatsApp or SMS message or an exported chat (lines like "[12/03/25, 10:32] Name: text", emojis, voice-note audio), a PDF, a photo or screenshot of a handwritten or printed list, a Word document, or an Excel/CSV table of items. It may be in English, Hindi, Marathi or Hinglish, with short forms ("63 pn6 2 roll", "1 inch 4kg 500mtr", "nos", "mtr"). When a chat has several messages, collect every product request in it, and if the customer later corrects a quantity or size use the corrected one. Ignore greetings, small talk and anything that is not part of the request.
 Return ONLY JSON of this shape:
 {"customer":{"name":string|null,"company":string|null,"phone":string|null,"email":string|null,"gstin":string|null}|null,
  "items":[{"raw":string,"kind":"pipe"|"sprinkler"|"fitting"|"other","od_mm":number|null,"pn":number|null,"grade":"PE63"|"PE80"|"PE100"|null,"qty":number|null,"unit":"m"|"rolls"|"pc"|"kg"|null,"brand":string|null}],
