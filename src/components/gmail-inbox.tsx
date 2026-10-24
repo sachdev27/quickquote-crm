@@ -13,6 +13,8 @@ export type GmailResult = {
   subject: string;
   from: string;
   files: string[];
+  model: string;
+  read: { name: string; how: string }[];
 };
 
 export function GmailInbox({ onExtracted }: { onExtracted: (r: GmailResult) => void }) {
