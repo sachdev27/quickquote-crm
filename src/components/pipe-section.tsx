@@ -28,10 +28,10 @@ export function PipeSection({ spec }: { spec: PipeSpec }) {
   const muted = "var(--qd-muted, #64748b)";
   return (
     <svg
-      viewBox="0 0 152 60"
+      viewBox="0 0 180 60"
       role="img"
       aria-label={label}
-      className="h-[12.5mm] w-[31.7mm] shrink-0"
+      className="h-[12.5mm] w-[37.5mm] shrink-0 overflow-visible"
       fontSize="9.5"
     >
       {/* bore + wall */}

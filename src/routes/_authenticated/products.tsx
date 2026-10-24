@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Calculator,
   Check,
   ChevronDown,
   Copy,
@@ -53,7 +52,6 @@ import {
 } from "@/lib/catalog";
 import {
   CATEGORY_LABELS,
-  GST_OPTIONS,
   UNIT_LABELS,
   costPerKg,
   fmtMoney,
@@ -73,6 +71,13 @@ import { useIsDesktop } from "@/hooks/use-mobile";
 import { useMe } from "@/hooks/use-me";
 import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
 import { WeightExplainer } from "@/components/weight-explainer";
+import { ProductFields } from "@/components/product-fields";
+import {
+  duplicateForm,
+  focusProductName,
+  productPayload,
+  type ProductForm,
+} from "@/lib/product-form";
 import { IS_EDITIONS, IS_SDRS, isOds, isSpec, type IsEdition } from "@/lib/is4984";
 
 export const Route = createFileRoute("/_authenticated/products")({
@@ -94,7 +99,6 @@ type RateForm = {
   pct: boolean;
   isNewGroup: boolean;
 };
-type ProductForm = Partial<Omit<Product, "weight_kg">> & { weight: string };
 type Tab = "pricing" | "weights" | "products";
 
 const n = (s: string) => Number(s) || 0;
@@ -357,27 +361,7 @@ function ProductsAdmin() {
     if (!p?.name?.trim()) return void toast.error("Name is required");
     if (!p.rate_group_id) return void toast.error("Pick a rate group");
     try {
-      await saveProduct({
-        data: {
-          ...(p.id ? { id: p.id } : {}),
-          category: (p.category ?? "fitting") as Category,
-          rate_group_id: p.rate_group_id,
-          name: p.name,
-          grade: p.grade ?? null,
-          roll: p.roll ?? null,
-          pn: p.pn ?? null,
-          inch: p.inch ?? null,
-          roll_lengths: p.roll_lengths ?? null,
-          hsn: p.hsn ?? null,
-          size_mm: p.size_mm ?? null,
-          brand_id: p.category === "sprinkler" ? (p.brand_id ?? null) : null,
-          length_m: p.category === "sprinkler" ? (p.length_m ?? null) : null,
-          unit: (p.unit ?? "pc") as Unit,
-          weight_kg: n(p.weight),
-          gst_rate: p.gst_rate ?? 18,
-          active,
-        },
-      });
+      await saveProduct({ data: productPayload(p, active) });
       await qc.invalidateQueries({ queryKey: ["products"] });
       setProd(null);
     } catch (err) {
@@ -394,14 +378,6 @@ function ProductsAdmin() {
     );
   }
 
-  const calcWeight = () => {
-    if (!prod?.size_mm || !prod.grade) return void toast.error("Set size, grade and PN first");
-    const sdr = sdrFor(prod.grade, pnNumber(prod.pn ?? null));
-    if (!sdr) return void toast.error("Unknown grade/PN for IS 4984 (use PE63, PE80 or PE100)");
-    setProd({ ...prod, weight: pipeKgPerM(prod.size_mm, sdr).toFixed(3) });
-    toast.success(`IS 4984: SDR ${sdr}`);
-  };
-
   const cardRate = card
     ? ratePerKg({
         raw_kg: n(card.raw),
@@ -416,13 +392,8 @@ function ProductsAdmin() {
   // Product editor: bottom sheet on phones, the right-hand pane on desktop.
   // Duplicate: the same details as a new, unsaved product; the name is selected for retyping.
   const duplicate = (p: ProductForm) => {
-    const { id: _id, ...rest } = p;
-    setProd({ ...rest, name: `${p.name ?? ""} (copy)` });
-    setTimeout(() => {
-      const el = document.getElementById("product-name") as HTMLInputElement | null;
-      el?.focus();
-      el?.select();
-    }, 350);
+    setProd(duplicateForm(p));
+    focusProductName();
   };
   const removeProduct = () =>
     confirm("Remove this product from the catalog?") && submitProduct(null, false);
@@ -431,224 +402,21 @@ function ProductsAdmin() {
   const productForm = prod && (
     <form onSubmit={submitProduct} className="@container flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4 @2xl:grid @2xl:grid-cols-2 @2xl:items-start @2xl:gap-x-6 @2xl:gap-y-4 @2xl:space-y-0">
-        <Chips<Category>
-          label="Category"
-          value={(prod.category ?? "fitting") as Category}
-          onChange={(c) =>
-            setProd({
-              ...prod,
-              category: c,
-              gst_rate: c === "sprinkler" ? 5 : 18,
-              unit: c === "pipe" ? "m" : (prod.unit ?? "pc"),
-            })
-          }
-          options={(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
-            value: c,
-            label: CATEGORY_LABELS[c],
-          }))}
-        />
-        <Field label="Name (as printed on quote)">
-          <input
-            id="product-name"
-            value={prod.name ?? ""}
-            onChange={(e) => setProd({ ...prod, name: e.target.value })}
-            placeholder="e.g. 110 mm Elbow 90°"
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Rate group">
-          <Chips
-            label="Rate group"
-            value={prod.rate_group_id ?? ""}
-            onChange={(id) => setProd({ ...prod, rate_group_id: id })}
-            options={(pricing.data?.groups ?? []).map((g) => ({
-              value: g.id,
-              label: g.name,
-              sub: `${fmtMoney(rateOf(g.id))}/kg`,
-            }))}
-          />
-        </Field>
-        {prod.category === "sprinkler" && (
-          <Field label="Brand (weights and raw rate belong to a brand)">
-            <Chips
-              label="Brand"
-              value={prod.brand_id ?? ""}
-              onChange={(id) => setProd({ ...prod, brand_id: id || null })}
-              options={[
-                { value: "", label: "Any brand" },
-                ...(brands.data ?? []).map((b) => ({ value: b.id, label: b.name })),
-              ]}
-            />
-          </Field>
-        )}
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Size (mm)">
-            <input
-              inputMode="numeric"
-              value={prod.size_mm ?? ""}
-              onChange={(e) =>
-                setProd({
-                  ...prod,
-                  size_mm: Math.round(Number(e.target.value.replace(/\D/g, ""))) || null,
-                })
-              }
-              className={inputCls}
-            />
-          </Field>
-          {prod.category === "sprinkler" && (
-            <Field label="Length (m)">
-              <input
-                inputMode="decimal"
-                list="sprinkler-lengths"
-                value={prod.length_m ?? ""}
-                onChange={(e) => setProd({ ...prod, length_m: Number(e.target.value) || null })}
-                placeholder="6"
-                className={inputCls}
-              />
-              <datalist id="sprinkler-lengths">
-                <option value="6" />
-                <option value="12" />
-              </datalist>
-            </Field>
-          )}
-          <Field label="Inch (trade size)">
-            <input
-              value={prod.inch ?? ""}
-              onChange={(e) => setProd({ ...prod, inch: e.target.value })}
-              placeholder='2"'
-              className={inputCls}
-            />
-          </Field>
-          <Field label="Grade">
-            <input
-              value={prod.grade ?? ""}
-              onChange={(e) => setProd({ ...prod, grade: e.target.value.toUpperCase() })}
-              placeholder="PE63"
-              className={inputCls}
-            />
-          </Field>
-          <Field label="Pressure class">
-            <input
-              value={prod.pn ?? ""}
-              onChange={(e) => setProd({ ...prod, pn: e.target.value })}
-              placeholder="PN 6"
-              className={inputCls}
-            />
-          </Field>
-        </div>
-        {prod.category === "pipe" && (
-          <div className="grid grid-cols-1 gap-2">
-            <Field label="Roll lengths (m)">
-              <input
-                value={prod.roll_lengths ?? ""}
-                onChange={(e) => setProd({ ...prod, roll_lengths: e.target.value })}
-                placeholder="300/500"
-                className={inputCls}
-              />
-            </Field>
-          </div>
-        )}
-        <Field label="Sold per">
-          <Chips<Unit>
-            label="Unit"
-            value={(prod.unit ?? "pc") as Unit}
-            onChange={(u) => setProd({ ...prod, unit: u })}
-            options={[
-              { value: "m", label: "Metre" },
-              { value: "pc", label: "Piece" },
-              { value: "kg", label: "Kg" },
-            ]}
-          />
-        </Field>
-        <Field label={`Weight (kg per ${UNIT_LABELS[(prod.unit ?? "pc") as Unit]})`}>
-          <div className="flex gap-2">
-            <input
-              inputMode="decimal"
-              value={prod.weight}
-              onChange={(e) => setProd({ ...prod, weight: e.target.value })}
-              className={inputCls}
-            />
-            {prod.category === "pipe" && (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-12 shrink-0 rounded-xl"
-                onClick={calcWeight}
-              >
-                <Calculator className="mr-1 h-4 w-4" /> IS 4984
-              </Button>
-            )}
-          </div>
-        </Field>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="GST">
-            <select
-              className={inputCls}
-              value={prod.gst_rate ?? 18}
-              onChange={(e) => setProd({ ...prod, gst_rate: +e.target.value })}
-            >
-              {GST_OPTIONS.map((g) => (
-                <option key={g} value={g}>
-                  {g}%
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="HSN/SAC">
-            <input
-              value={prod.hsn ?? ""}
-              onChange={(e) => setProd({ ...prod, hsn: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-        </div>
-        <div className="flex items-baseline justify-between rounded-xl bg-secondary px-4 py-3 tabular-nums">
-          <span className="text-sm text-muted-foreground">
-            {fmtNum(n(prod.weight), 3)} kg ×{" "}
-            {fmtMoney(rateOf(prod.rate_group_id ?? "", n(prod.weight), prod.brand_id))}/kg (
-            {presetName(presetId)}
-            {prod.brand_id
-              ? ` · ${brands.data?.find((b) => b.id === prod.brand_id)?.name ?? ""} raw`
-              : ""}
-            )
-          </span>
-          <span className="text-xl font-bold">
-            {fmtMoney(
-              rateOf(prod.rate_group_id ?? "", n(prod.weight), prod.brand_id) * n(prod.weight),
-            )}
-            <span className="text-sm font-medium text-muted-foreground">
-              /{UNIT_LABELS[(prod.unit ?? "pc") as Unit]}
-            </span>
-          </span>
-        </div>
-        {prod.rate_group_id === "SPRINKLER" &&
-          (() => {
-            // sprinkler pipe: ₹ per piece = raw ₹/kg × piece weight + production + coupler + margin (flat per piece)
-            const r = rateRow(presetId, "SPRINKLER");
-            if (!r) return null;
-            const b = prod.brand_id
-              ? scoped?.brandRaw.find(
-                  (x) => x.brand_id === prod.brand_id && x.group_id === "SPRINKLER",
-                )
+        <ProductFields
+          prod={prod}
+          setProd={setProd}
+          groups={pricing.data?.groups ?? []}
+          brands={brands.data ?? []}
+          basis={presetName(presetId)}
+          rateOf={rateOf}
+          sprinklerRate={(bid) => {
+            const r = rateRow(presetId, SPRINKLER_GROUP);
+            const b = bid
+              ? scoped?.brandRaw.find((x) => x.brand_id === bid && x.group_id === SPRINKLER_GROUP)
               : undefined;
-            const raw = withBrandRaw(r, b).raw_kg;
-            const w = n(prod.weight);
-            return (
-              <p className="rounded-xl border border-dashed border-border p-3 text-xs leading-relaxed text-muted-foreground tabular-nums">
-                How this price is worked out ({presetName(presetId)}
-                {prod.brand_id
-                  ? `, ${brands.data?.find((x) => x.id === prod.brand_id)?.name ?? ""} raw`
-                  : ""}
-                ): raw ₹{fmtNum(raw)}/kg × {fmtNum(w, 3)} kg = {fmtMoney(raw * w)} + production{" "}
-                {fmtMoney(r.production_kg)} + coupler {fmtMoney(r.transport_kg)} + margin{" "}
-                {fmtMoney(r.margin)} ={" "}
-                <b className="text-foreground">
-                  {fmtMoney(raw * w + r.production_kg + r.transport_kg + r.margin)}
-                </b>{" "}
-                per piece. Change these under Pricing.
-              </p>
-            );
-          })()}
+            return r && withBrandRaw(r, b);
+          }}
+        />
       </div>
       <div className="flex gap-2 border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         {/* in the desktop side pane the trash sits in the pane header; in a dialog/sheet it lives here */}
@@ -2817,9 +2585,6 @@ function SprinklerCard({
 const pnLabel = (p: Pick<Product, "pn">) => (p.pn ? String(pnNumber(p.pn) || p.pn) : "—");
 const rollLabel = (p: Pick<Product, "roll" | "roll_lengths">) =>
   p.roll === "cut" ? "cut" : p.roll_lengths ? `${p.roll_lengths} m` : "—";
-const colInput =
-  "h-8 w-full min-w-[4.5rem] rounded-md border border-input bg-background px-2 text-xs font-normal normal-case tracking-normal text-foreground outline-none focus:border-primary";
-
 function ProductList({
   products,
   loading,

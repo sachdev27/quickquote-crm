@@ -192,10 +192,10 @@ export function FittingDrawing({ description }: { description: string }) {
     ?.replace(/\s*[×x]\s*/, " × ");
   return (
     <svg
-      viewBox="0 0 152 60"
+      viewBox="0 0 180 60"
       role="img"
       aria-label={`Fitting drawing${size ? `, ${size} mm` : ""}`}
-      className="h-[12.5mm] w-[31.7mm] shrink-0"
+      className="h-[12.5mm] w-[37.5mm] shrink-0 overflow-visible"
       fontSize="9.5"
     >
       {d.runs.map(([p, w]) => (

@@ -800,7 +800,7 @@ const quoteBody = z.object({
   profileId: z.string().nullable(),
   nonIsi: z.boolean().default(false),
   terms: z.array(text.min(1)).max(30).default([]),
-  newCustomer: z.object({ name: text.min(1), phone: opt, gstin: opt }).nullable(),
+  newCustomer: z.object(customerFields).nullable(),
   enquiryId: z.string().nullable().default(null),
   igst: z.boolean(),
   extra: money,

@@ -1,0 +1,6 @@
+impeccable pbakaus/impeccable@9368675 .agents/skills/impeccable
+design-taste-frontend Leonxlnx/taste-skill@6010f91 skills/taste-skill
+emil-design-eng emilkowalski/skills@2d22863 skills/emil-design-eng
+improve-animations emilkowalski/skills@2d22863 skills/improve-animations
+grill-me mattpocock/skills@5beb35b skills/productivity/grill-me
+grilling mattpocock/skills@5beb35b skills/productivity/grilling

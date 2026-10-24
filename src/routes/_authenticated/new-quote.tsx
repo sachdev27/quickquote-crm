@@ -1,12 +1,15 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, MessageCircle, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, MessageCircle, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, Field, Stepper, inputCls } from "@/components/qq";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
+import { CustomerDialog } from "@/components/customer-dialog";
+import { ProductDialog } from "@/components/product-dialog";
+import type { ProductForm } from "@/lib/product-form";
 import { Switch } from "@/components/ui/switch";
 import { FittingForm } from "@/components/fitting-form";
 import {
@@ -65,6 +68,7 @@ export const Route = createFileRoute("/_authenticated/new-quote")({
 });
 
 type Product = Awaited<ReturnType<typeof listProducts>>[number];
+type CustomerRow = NonNullable<Awaited<ReturnType<typeof listCustomers>>>[number];
 // rateEdited: a hand-typed ₹/kg on the line wins over the quote's rate card.
 // rollLen: metres per roll (pipes in metres only); the roll layout is also written into the description.
 // fromSaved: loaded from a saved quote, so its ₹/kg is frozen but not an edit made now.
@@ -139,6 +143,23 @@ function NewQuote() {
   const [brandId, setBrandId] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [nc, setNc] = useState({ name: "", phone: "", gstin: "" });
+  const [custOpen, setCustOpen] = useState(false);
+  const [custIdx, setCustIdx] = useState(0);
+  const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Partial<CustomerRow> | null>(null);
+  const [productDialogOpen, setProductDialogOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | ProductForm | null>(null);
+
+  const custBoxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (custBoxRef.current && !custBoxRef.current.contains(e.target as Node)) {
+        setCustOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
   const [presetId, setPresetId] = useState("");
   const [profileId, setProfileId] = useState("");
   const [nonIsi, setNonIsi] = useState(false);
@@ -490,6 +511,35 @@ function NewQuote() {
     if (focus) setFocusKey(key);
     if (!quiet) toast.success("Added", { duration: 1000 });
   };
+  const duplicateLine = (key: string) => {
+    const idx = lines.findIndex((l) => l.key === key);
+    const cur = lines[idx];
+    if (!cur) return;
+    const dup: Draft = { ...cur, key: crypto.randomUUID() };
+    const next = [...lines];
+    next.splice(idx + 1, 0, dup);
+    setLines(next);
+    setFocusKey(dup.key);
+    toast.success(`Duplicated ${cur.description}`);
+  };
+  const editCatalogProduct = (productId: string) => {
+    const p = prods.data?.find((x) => x.id === productId);
+    if (!p) return void toast.error("Product not found in catalog");
+    setEditingProduct(p);
+    setProductDialogOpen(true);
+  };
+  const createNewProduct = (cat?: Category) => {
+    setEditingProduct({
+      category: cat ?? "fitting",
+      rate_group_id: pricing.data?.groups[0]?.id ?? "",
+      name: "",
+      unit: cat === "pipe" ? "m" : "pc",
+      weight: "",
+      gst_rate: cat === "sprinkler" ? 5 : 18,
+      active: 1,
+    });
+    setProductDialogOpen(true);
+  };
   // Desktop catalog click: add the product, or bump its qty by one roll / step if it's already on the quote.
   const addFromCatalog = (p: Product, bid?: string) => {
     const step =
@@ -684,10 +734,38 @@ function NewQuote() {
   const [custText, setCustText] = useState("");
   const onCustomer = (v: string) => {
     setCustText(v);
-    const hit = customers.data?.find((c) => custLabel(c) === v);
+    const hit = customers.data?.find(
+      (c) =>
+        custLabel(c).toLowerCase() === v.trim().toLowerCase() ||
+        c.name.toLowerCase() === v.trim().toLowerCase(),
+    );
     setCustomerId(hit?.id ?? "");
     setNc({ ...nc, name: hit ? "" : v });
   };
+  const chooseCustomer = (c: { id: string; name: string; phone: string | null }) => {
+    setCustomerId(c.id);
+    setCustText(custLabel(c));
+    setNc({ name: "", phone: "", gstin: "" });
+    setCustOpen(false);
+    setTimeout(() => quickRef.current?.focus(), 0);
+  };
+  const filteredCustomers = useMemo(() => {
+    const q = custText.trim().toLowerCase();
+    const list = customers.data ?? [];
+    if (!q) return list.slice(0, 8);
+    return list
+      .filter((c) => {
+        return (
+          c.name.toLowerCase().includes(q) ||
+          (c.phone && c.phone.toLowerCase().includes(q)) ||
+          (c.city && c.city.toLowerCase().includes(q)) ||
+          (c.contact_person && c.contact_person.toLowerCase().includes(q)) ||
+          (c.gstin && c.gstin.toLowerCase().includes(q))
+        );
+      })
+      .slice(0, 10);
+  }, [customers.data, custText]);
+  const selectedCustomer = customers.data?.find((c) => c.id === customerId);
 
   // Started from an enquiry: pre-fill customer, brand and notes once data is in.
   const { enquiry: enquiryId } = Route.useSearch();
@@ -777,28 +855,243 @@ function NewQuote() {
       <div className="space-y-4">
         {/* command bar: who, which brand, which price basis — one row on desktop */}
         <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2.2fr)_repeat(5,minmax(0,1fr))]">
-          <div className="sm:col-span-2 lg:col-span-1">
-            <input
-              ref={custRef}
-              list="customer-list"
-              aria-label="Customer"
-              placeholder={`Customer: type name or phone (blank = walk-in)   (${ALT}C)`}
-              value={custText}
-              onChange={(e) => onCustomer(e.target.value)}
-              onKeyDown={(e) => {
-                // Enter: customer done, on to the items
-                // (after a tick, so Enter can still pick a highlighted suggestion first)
-                if (e.key === "Enter" && !e.metaKey && !e.ctrlKey)
-                  setTimeout(() => quickRef.current?.focus(), 0);
-              }}
-              className={`${inputCls} h-11`}
-            />
-            <datalist id="customer-list">
-              {customers.data?.map((c) => (
-                <option key={c.id} value={custLabel(c)} />
-              ))}
-            </datalist>
-            {custText && !customerId && (
+          <div className="sm:col-span-2 lg:col-span-1" ref={custBoxRef}>
+            <div className="relative">
+              <input
+                ref={custRef}
+                autoComplete="off"
+                role="combobox"
+                aria-expanded={custOpen && filteredCustomers.length > 0}
+                aria-label="Customer"
+                placeholder={`Customer: type name or phone (blank = walk-in)   (${ALT}C)`}
+                value={custText}
+                onFocus={() => setCustOpen(true)}
+                onChange={(e) => {
+                  onCustomer(e.target.value);
+                  setCustOpen(true);
+                  setCustIdx(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.metaKey || e.ctrlKey) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setCustOpen(true);
+                    setCustIdx((i) => Math.min(i + 1, filteredCustomers.length - 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setCustIdx((i) => Math.max(i - 1, 0));
+                  } else if (e.key === "Enter") {
+                    if (custOpen && filteredCustomers[custIdx]) {
+                      e.preventDefault();
+                      chooseCustomer(filteredCustomers[custIdx]);
+                    } else {
+                      setCustOpen(false);
+                      setTimeout(() => quickRef.current?.focus(), 0);
+                    }
+                  } else if (e.key === "Escape") {
+                    setCustOpen(false);
+                  }
+                }}
+                className={`${inputCls} h-11 pr-16`}
+              />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                {custText && (
+                  <button
+                    type="button"
+                    className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    onClick={() => {
+                      setCustomerId("");
+                      setCustText("");
+                      setNc({ name: "", phone: "", gstin: "" });
+                      custRef.current?.focus();
+                    }}
+                    title="Clear customer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+                {selectedCustomer ? (
+                  <button
+                    type="button"
+                    className="rounded p-1 text-primary hover:bg-primary/10"
+                    onClick={() => {
+                      setEditingCustomer(selectedCustomer);
+                      setCustomerDialogOpen(true);
+                    }}
+                    title="Edit customer details"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                    onClick={() => {
+                      setEditingCustomer(
+                        custText.trim()
+                          ? {
+                              name: custText.trim(),
+                              phone: nc.phone || null,
+                              gstin: nc.gstin || null,
+                            }
+                          : null,
+                      );
+                      setCustomerDialogOpen(true);
+                    }}
+                    title="Add new customer"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Styled floating customer suggestions matching app theme */}
+              {custOpen && (
+                <ul
+                  id="customer-suggestions"
+                  role="listbox"
+                  className="absolute inset-x-0 top-full z-40 mt-1 max-h-80 overflow-y-auto rounded-xl border border-border bg-popover shadow-xl backdrop-blur-md"
+                >
+                  {filteredCustomers.length > 0 ? (
+                    filteredCustomers.map((c, i) => (
+                      <li key={c.id} role="option" aria-selected={i === custIdx}>
+                        <button
+                          type="button"
+                          onMouseEnter={() => setCustIdx(i)}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            chooseCustomer(c);
+                          }}
+                          className={`flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-sm transition-colors ${
+                            i === custIdx
+                              ? "bg-primary/10 text-primary"
+                              : "hover:bg-secondary/70 text-foreground"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold truncate">{c.name}</span>
+                              {c.city && (
+                                <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                  {c.city}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground truncate">
+                              {c.contact_person && <span>{c.contact_person}</span>}
+                              {c.contact_person && c.phone && <span>·</span>}
+                              {c.phone && <span className="font-mono">{c.phone}</span>}
+                              {c.gstin && (
+                                <>
+                                  <span>·</span>
+                                  <span className="font-mono">GST: {c.gstin}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          {c.id === customerId && (
+                            <span className="shrink-0 text-xs font-semibold text-primary">
+                              Selected
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="px-3 py-3 text-center text-xs text-muted-foreground">
+                      No matching customers found
+                    </li>
+                  )}
+                  {custText.trim() && !customerId && (
+                    <li className="border-t border-border/60 p-1">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setCustOpen(false);
+                          setEditingCustomer({
+                            name: custText.trim(),
+                            phone: nc.phone || null,
+                            gstin: nc.gstin || null,
+                          });
+                          setCustomerDialogOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        <Plus className="h-4 w-4 shrink-0" />
+                        <span>Create new customer "{custText.trim()}" with full details…</span>
+                      </button>
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+
+            {/* Selected Customer Details Banner */}
+            {selectedCustomer ? (
+              <div className="mt-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-foreground">{selectedCustomer.name}</span>
+                    {selectedCustomer.contact_person && (
+                      <span className="text-muted-foreground">
+                        ({selectedCustomer.contact_person})
+                      </span>
+                    )}
+                    {selectedCustomer.city && (
+                      <span className="rounded bg-background px-1.5 py-0.5 font-medium text-foreground border border-border/60">
+                        {selectedCustomer.city}
+                      </span>
+                    )}
+                    {selectedCustomer.gstin && (
+                      <span className="rounded bg-background px-1.5 py-0.5 font-mono text-muted-foreground border border-border/60">
+                        GST: {selectedCustomer.gstin}
+                      </span>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 px-2 text-[11px] font-medium text-primary hover:bg-primary/10"
+                    onClick={() => {
+                      setEditingCustomer(selectedCustomer);
+                      setCustomerDialogOpen(true);
+                    }}
+                  >
+                    <Pencil className="h-3 w-3" />
+                    <span>Edit details</span>
+                  </Button>
+                </div>
+                {(selectedCustomer.phone ||
+                  selectedCustomer.address ||
+                  selectedCustomer.ship_to) && (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground">
+                    {selectedCustomer.phone && (
+                      <span>
+                        Phone:{" "}
+                        <a
+                          href={`tel:${selectedCustomer.phone}`}
+                          className="font-mono text-foreground hover:underline"
+                        >
+                          {selectedCustomer.phone}
+                        </a>
+                      </span>
+                    )}
+                    {selectedCustomer.address && (
+                      <span className="truncate max-w-[280px]">
+                        Addr: {selectedCustomer.address}
+                      </span>
+                    )}
+                    {selectedCustomer.ship_to && (
+                      <span className="truncate max-w-[280px]">
+                        Ship: {selectedCustomer.ship_to}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : custText && !customerId ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <input
                   placeholder="Phone (new customer)"
@@ -814,7 +1107,7 @@ function NewQuote() {
                   className={`${inputCls} h-10`}
                 />
               </div>
-            )}
+            ) : null}
           </div>
           <select
             aria-label="Brand"
@@ -902,6 +1195,11 @@ function NewQuote() {
               brandName={brandName}
               onAddLine={(l) => addLine(l, false, true)}
               onMore={() => setSheet(true)}
+              onNewProduct={(cat) => createNewProduct(cat)}
+              onEditProduct={(p) => {
+                setEditingProduct(p);
+                setProductDialogOpen(true);
+              }}
               inQuote={
                 new Set(
                   lines
@@ -1013,14 +1311,36 @@ function NewQuote() {
                         </p>
                         <p className="font-semibold leading-snug">{l.description}</p>
                       </div>
-                      <button
-                        type="button"
-                        aria-label="Remove item"
-                        className="-m-2 p-2 text-muted-foreground"
-                        onClick={() => removeLine(l.key)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {l.productId && (
+                          <button
+                            type="button"
+                            aria-label="Edit product in catalog"
+                            title="Edit product in catalog"
+                            className="-m-1 p-2 text-muted-foreground hover:text-foreground"
+                            onClick={() => editCatalogProduct(l.productId!)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          aria-label="Duplicate item"
+                          title="Duplicate item"
+                          className="-m-1 p-2 text-muted-foreground hover:text-foreground"
+                          onClick={() => duplicateLine(l.key)}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Remove item"
+                          className="-m-2 p-2 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeLine(l.key)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                     {isRollPipe(l) && (
                       <div className="mt-3 grid grid-cols-3 gap-2">
@@ -1168,14 +1488,36 @@ function NewQuote() {
                             {fmtMoney(lineGross(l))}
                           </td>
                           <td className="pl-1 text-right">
-                            <button
-                              type="button"
-                              aria-label="Remove item"
-                              className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                              onClick={() => removeLine(l.key)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              {l.productId && (
+                                <button
+                                  type="button"
+                                  aria-label="Edit product in catalog"
+                                  title="Edit product in catalog"
+                                  className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                                  onClick={() => editCatalogProduct(l.productId!)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                aria-label="Duplicate item"
+                                title="Duplicate item"
+                                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                                onClick={() => duplicateLine(l.key)}
+                              >
+                                <Copy className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="Remove item"
+                                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-destructive"
+                                onClick={() => removeLine(l.key)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1535,6 +1877,79 @@ function NewQuote() {
           brandName={brandName}
         />
       )}
+
+      <ProductDialog
+        open={productDialogOpen}
+        onOpenChange={setProductDialogOpen}
+        product={editingProduct}
+        groups={pricing.data?.groups ?? []}
+        brands={brands.data ?? []}
+        basis={presetName(presetId)}
+        rateOf={rateOf}
+        sprinklerRate={(bid) => {
+          const r = rateRow(groupPreset[SPRINKLER_GROUP] ?? presetId, SPRINKLER_GROUP);
+          const b = brandRawFor(SPRINKLER_GROUP, bid ?? brandId);
+          return r && withBrandRaw(r, b);
+        }}
+        onSaved={(saved, id) => {
+          // If quote lines use this product, update them!
+          setLines((prev) =>
+            prev.map((l) => {
+              if (l.productId === id) {
+                const w = Number(saved.weight) || l.weightKg;
+                const r = rateOf(saved.rate_group_id ?? "", w, lineBrandId(l));
+                return {
+                  ...l,
+                  description: saved.name || l.description,
+                  weightKg: w,
+                  rateKg: l.rateEdited ? l.rateKg : r,
+                  unitPrice: l.rateEdited ? l.unitPrice : w > 0 ? w * r : l.unitPrice,
+                  gstRate: saved.gst_rate ?? l.gstRate,
+                  unit: (saved.unit as Unit) ?? l.unit,
+                };
+              }
+              return l;
+            }),
+          );
+          // If it was a newly created product, add it to the quote!
+          if (!editingProduct?.id) {
+            const w = Number(saved.weight) || 0;
+            const lb = saved.brand_id || brandId;
+            const r = rateOf(saved.rate_group_id ?? "", w, lb);
+            addLine(
+              {
+                productId: id,
+                brandId: lb,
+                rateGroupId: saved.rate_group_id ?? "",
+                category: (saved.category ?? "fitting") as Category,
+                description: saved.name ?? "New Product",
+                hsn: saved.hsn ?? null,
+                unit: (saved.unit ?? "pc") as Unit,
+                qty: (saved.unit as Unit) === "m" ? 100 : 1,
+                weightKg: w,
+                rateKg: r,
+                unitPrice: w > 0 ? w * r : 0,
+                gstRate: saved.gst_rate ?? 18,
+              },
+              false,
+              true,
+            );
+          }
+        }}
+      />
+
+      <CustomerDialog
+        open={customerDialogOpen}
+        onOpenChange={setCustomerDialogOpen}
+        customer={editingCustomer}
+        onSaved={(newId) => {
+          qc.invalidateQueries({ queryKey: ["customers"] });
+          setCustomerId(newId);
+          const c = customers.data?.find((x) => x.id === newId) ?? editingCustomer;
+          if (c && c.name) setCustText(custLabel({ name: c.name, phone: c.phone ?? null }));
+          setNc({ name: "", phone: "", gstin: "" });
+        }}
+      />
     </PageShell>
   );
 }
@@ -1546,6 +1961,8 @@ function CatalogPanel({
   onPick,
   onAddLine,
   onMore,
+  onNewProduct,
+  onEditProduct,
   inQuote,
   quoteBrandId,
   brandName,
@@ -1557,6 +1974,8 @@ function CatalogPanel({
   onPick: (p: Product) => void;
   onAddLine: (l: Line) => void;
   onMore: () => void;
+  onNewProduct?: (cat: Category) => void;
+  onEditProduct?: (p: Product) => void;
   inQuote: Set<string>;
 }) {
   const [cat, setCat] = useState<Category>("pipe");
@@ -1667,11 +2086,14 @@ function CatalogPanel({
             </li>
           )}
           {others.map((p) => (
-            <li key={p.id}>
+            <li
+              key={p.id}
+              className="group flex items-center justify-between gap-1 rounded-md px-1 hover:bg-secondary"
+            >
               <button
                 type="button"
                 onClick={() => onPick(p)}
-                className={`flex w-full items-center justify-between gap-2 rounded-md px-1 py-2 text-left hover:bg-secondary ${inQuote.has(p.id) ? "text-primary" : ""}`}
+                className={`flex min-w-0 flex-1 items-center justify-between gap-2 py-2 text-left ${inQuote.has(p.id) ? "text-primary" : ""}`}
               >
                 <span className="min-w-0 truncate text-sm font-medium">
                   {quoteTitle(p, brandName(p.brand_id))}
@@ -1680,13 +2102,37 @@ function CatalogPanel({
                   ₹{fmtNum(unitPrice(p))}/{UNIT_LABELS[p.unit as Unit]}
                 </span>
               </button>
+              {onEditProduct && (
+                <button
+                  type="button"
+                  onClick={() => onEditProduct(p)}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-foreground rounded transition-opacity"
+                  title="Edit product in catalog"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
-      <Button variant="ghost" className="h-9 w-full rounded-lg text-sm" onClick={onMore}>
-        Custom item, new size or custom length…
-      </Button>
+      <div className="flex flex-col gap-1.5 pt-1">
+        <Button
+          variant="outline"
+          className="h-9 w-full gap-1.5 rounded-lg text-xs font-medium border-dashed"
+          onClick={() => onNewProduct?.(cat)}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span>New {CATEGORY_LABELS[cat].toLowerCase()} in catalog</span>
+        </Button>
+        <Button
+          variant="ghost"
+          className="h-8 w-full rounded-lg text-xs text-muted-foreground"
+          onClick={onMore}
+        >
+          Custom item, new size or custom length…
+        </Button>
+      </div>
     </Card>
   );
 }

@@ -44,7 +44,7 @@ export function CustomerDialog({
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  customer?: Row | null;
+  customer?: Partial<Row> | null;
   quoteId?: string;
   onSaved?: (id: string) => void;
 }) {
