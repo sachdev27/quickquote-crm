@@ -227,8 +227,13 @@ function NewQuote() {
     return r ? formRate(toForm(withBrandRaw(r, brandRawFor(id, bid))), nonIsi, id, weightKg) : 0;
   };
   // Lines priced with a separate non-ISI raw price are labelled so the quote never implies an ISI mark.
-  const isNonIsiLine = (l: Line) =>
-    nonIsi && !!l.rateGroupId && (rates[l.rateGroupId]?.rawNonIsi.trim() ?? "") !== "";
+  const isNonIsiLine = (l: Line) => {
+    if (!nonIsi || !l.rateGroupId) return false;
+    const bid = isBranded(l) ? lineBrandId(l) : brandId;
+    if (bid === brandId) return (rates[l.rateGroupId]?.rawNonIsi.trim() ?? "") !== "";
+    const r = rateRow(groupPreset[l.rateGroupId] ?? presetId, l.rateGroupId);
+    return !!r && withBrandRaw(r, brandRawFor(l.rateGroupId, bid)).raw_kg_non_isi != null;
+  };
   // In-house weights (the products' own) are the default; "IS 4984" prices catalog pipes on the standard's weights.
   const lineWeightKg = (l: Draft) => {
     if (weightBasis !== "is" || !l.productId) return l.weightKg;
@@ -438,14 +443,13 @@ function NewQuote() {
   const addFromCatalog = (p: Product, bid?: string) => {
     const step =
       (p.roll_lengths ?? "").split("/").map(Number).find(Boolean) ?? (p.unit === "m" ? 100 : 10);
-    const existing = lines.find(
-      (l) => l.productId === p.id && lineBrandId(l) === (p.brand_id || bid || brandId),
-    );
+    const lb = p.brand_id || bid || brandId;
+    const existing = lines.find((l) => l.productId === p.id && lineBrandId(l) === lb);
     if (existing) return patch(existing.key, { qty: existing.qty + (rollLenOf(existing) || step) });
     addLine(
       {
         productId: p.id,
-        brandId: p.brand_id || bid || brandId,
+        brandId: lb,
         rateGroupId: p.rate_group_id,
         category: p.category as Category,
         description: quoteTitle(p),
@@ -453,8 +457,8 @@ function NewQuote() {
         unit: p.unit as Unit,
         qty: step,
         weightKg: p.weight_kg,
-        rateKg: rateOf(p.rate_group_id, p.weight_kg, p.brand_id),
-        unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, p.brand_id),
+        rateKg: rateOf(p.rate_group_id, p.weight_kg, lb),
+        unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, lb),
         gstRate: p.gst_rate,
       },
       true,
@@ -573,13 +577,16 @@ function NewQuote() {
       const n = qtyTok ? Number(qtyTok.slice(1)) : p.category === "pipe" ? 1 : Number(nums[0]) || 1;
       return p.unit === "m" ? n * (len ?? 100) : n;
     };
-    return out.slice(0, 40).map((p) => ({ p, brand, qty: qty(p) }));
+    // the line's brand: a sprinkler's own, else the typed brand, else the quote's
+    return out
+      .slice(0, 40)
+      .map((p) => ({ p, bid: p.brand_id || brand?.id || brandId, qty: qty(p) }));
   }, [quick, prods.data, brands.data, brandId]);
 
   function quickAdd(i = qi) {
     const s = suggestions[i];
     if (!s) return void toast.error("No matching product. Try: tarko 63 6 pe63 roll x2");
-    addFromCatalogQty(s.p, s.qty, s.brand?.id);
+    addFromCatalogQty(s.p, s.qty, s.bid);
     setQuick("");
     setQi(0);
   }
@@ -590,14 +597,13 @@ function NewQuote() {
         ? quoteTitle(p)
         : p.name;
   function addFromCatalogQty(p: Product, qty: number, bid?: string) {
-    const existing = lines.find(
-      (l) => l.productId === p.id && lineBrandId(l) === (p.brand_id || bid || brandId),
-    );
+    const lb = p.brand_id || bid || brandId;
+    const existing = lines.find((l) => l.productId === p.id && lineBrandId(l) === lb);
     if (existing) return patch(existing.key, { qty: existing.qty + qty });
     addLine(
       {
         productId: p.id,
-        brandId: p.brand_id || bid || brandId,
+        brandId: lb,
         rateGroupId: p.rate_group_id,
         category: p.category as Category,
         description: quoteTitle(p),
@@ -605,8 +611,8 @@ function NewQuote() {
         unit: p.unit as Unit,
         qty,
         weightKg: p.weight_kg,
-        rateKg: rateOf(p.rate_group_id, p.weight_kg, p.brand_id),
-        unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, p.brand_id),
+        rateKg: rateOf(p.rate_group_id, p.weight_kg, lb),
+        unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, lb),
         gstRate: p.gst_rate,
       },
       true,
@@ -751,9 +757,14 @@ function NewQuote() {
               const id = e.target.value;
               setBrandId(id);
               remember(LAST_BRAND, id);
-              // pipes follow the quote's brand; sprinklers keep their own (their weights are brand-specific)
+              // pipes that were on the old quote brand follow it (repriced); pipes deliberately of another
+              // brand, and sprinklers (brand-specific weights), keep theirs
               setLines((x) =>
-                x.map((l) => (l.category === "pipe" && l.productId ? { ...l, brandId: id } : l)),
+                x.map((l) =>
+                  l.category === "pipe" && l.productId && lineBrandId(l) === brandId
+                    ? { ...l, brandId: id, rateEdited: false, fromSaved: false }
+                    : l,
+                ),
               );
               const pid = brands.data?.find((b) => b.id === id)?.default_preset_id;
               if (pid && pricing.data?.presets.some((p) => p.id === pid)) setPresetId(pid);
@@ -824,7 +835,13 @@ function NewQuote() {
               brandName={brandName}
               onAddLine={(l) => addLine(l)}
               onMore={() => setSheet(true)}
-              inQuote={new Set(lines.map((l) => l.productId ?? ""))}
+              inQuote={
+                new Set(
+                  lines
+                    .filter((l) => l.category !== "pipe" || lineBrandId(l) === brandId)
+                    .map((l) => l.productId ?? ""),
+                )
+              }
             />
           </aside>
 
@@ -877,16 +894,14 @@ function NewQuote() {
                             className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${i === qi ? "bg-primary/10" : ""}`}
                           >
                             <span className="min-w-0 truncate">
-                              <b>{(s.brand ?? brands.data?.find((b) => b.id === brandId))?.name}</b>{" "}
-                              {suggestLabel(s.p)}
+                              <b>{brandName(s.bid)}</b> {suggestLabel(s.p)}
                             </span>
                             <span className="shrink-0 tabular-nums text-muted-foreground">
                               {fmtNum(s.qty)} {UNIT_LABELS[s.p.unit as Unit]} ·{" "}
                               <b className="text-foreground">
                                 ₹
                                 {fmtNum(
-                                  s.p.weight_kg *
-                                    rateOf(s.p.rate_group_id, s.p.weight_kg, s.p.brand_id),
+                                  s.p.weight_kg * rateOf(s.p.rate_group_id, s.p.weight_kg, s.bid),
                                 )}
                                 /{UNIT_LABELS[s.p.unit as Unit]}
                               </b>
@@ -1469,7 +1484,7 @@ function CatalogPanel({
   const rows = pipes.filter((p) => p.grade === g && (p.roll ?? "complete") === r);
   const sizes = uniq(rows.map((p) => p.size_mm ?? 0)).sort((a, b) => a - b);
   const pns = uniq(rows.map((p) => p.pn ?? "")).sort((a, b) => pnNumber(a) - pnNumber(b));
-  // the quote's brand first; another brand's sprinkler switches the quote when picked
+  // sprinklers of the quote's brand first
   const foreign = (p: Product) =>
     p.category === "sprinkler" && !!p.brand_id && p.brand_id !== quoteBrandId;
   const others = products
