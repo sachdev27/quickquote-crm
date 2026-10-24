@@ -56,6 +56,10 @@ function AiQuotePage() {
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<"paste" | "gmail">("paste");
   const [from, setFrom] = useState<string | null>(null);
+  const [readInfo, setReadInfo] = useState<{
+    model: string;
+    read: { name: string; how: string }[];
+  } | null>(null);
 
   const applyExtraction = (extraction: Extraction) => {
     setCustomer(extraction.customer);
@@ -76,7 +80,11 @@ function AiQuotePage() {
       );
       return extractEnquiry({ data: { source: "upload", text, attachments } });
     },
-    onSuccess: ({ extraction }) => applyExtraction(extraction),
+    onSuccess: ({ extraction, model, read }) => {
+      setFrom(null);
+      setReadInfo({ model, read });
+      applyExtraction(extraction);
+    },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Extraction failed"),
   });
 
@@ -165,6 +173,7 @@ function AiQuotePage() {
           {tab === "gmail" ? (
             <GmailInbox
               onExtracted={(r) => {
+                setReadInfo({ model: r.model, read: r.read });
                 applyExtraction(r.extraction);
                 setFrom(
                   `${r.subject}${r.files.length ? ` (+${r.files.length} file${r.files.length > 1 ? "s" : ""})` : ""}`,
@@ -277,6 +286,14 @@ function AiQuotePage() {
                 </label>
               </div>
               {from && <p className="text-xs text-muted-foreground">From email: {from}</p>}
+              {readInfo && (
+                <p className="text-xs text-muted-foreground">
+                  AI ({readInfo.model}) read the message text
+                  {readInfo.read.map((r) => `, ${r.name} (${r.how})`).join("")}. Found {rows.length}{" "}
+                  line
+                  {rows.length === 1 ? "" : "s"}.
+                </p>
+              )}
               {notes && <p className="rounded-lg bg-secondary px-3 py-2 text-xs">Notes: {notes}</p>}
 
               <ul className="divide-y divide-border">
