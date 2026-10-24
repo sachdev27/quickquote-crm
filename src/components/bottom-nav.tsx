@@ -9,6 +9,7 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Tag,
   Users,
 } from "lucide-react";
@@ -22,6 +23,7 @@ const LINKS = [
   { to: "/invoices", label: "Invoices", Icon: FileText },
   { to: "/activities", label: "Activities", Icon: CalendarCheck },
   { to: "/price-extractor", label: "Extractor", Icon: Calculator },
+  { to: "/ai-quote", label: "AI Quote", Icon: Sparkles },
   { to: "/customers", label: "Customers", Icon: Users },
   { to: "/products", label: "Products", Icon: Tag },
   { to: "/settings", label: "Settings", Icon: Settings },

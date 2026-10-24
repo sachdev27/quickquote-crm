@@ -7,6 +7,10 @@ export interface Env {
   DB: D1Database;
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
+  // AI quotes: secret in production (`wrangler secret put GEMINI_API_KEY`), .dev.vars locally
+  GEMINI_API_KEY?: string;
+  AI_PROVIDER?: string;
+  AI_MODEL?: string;
 }
 
 let envP: Promise<Env> | undefined;
