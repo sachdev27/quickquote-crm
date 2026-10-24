@@ -16,5 +16,8 @@
   "vars": {
     "ACCESS_TEAM_DOMAIN": "tarkoindia.cloudflareaccess.com",
     "ACCESS_AUD": "5aba95623b2234798347421438bbee3433825a62ebefb336ea5c2e5e27d24843",
+    // Gmail inbox (AI Quote). The client ID is public; GOOGLE_CLIENT_SECRET and GEMINI_API_KEY must be
+    // dashboard Secrets (plain variables not listed here are wiped on every deploy).
+    "GOOGLE_CLIENT_ID": "1025577054923-cpavvolku40dblragckc2n9cltee3qba.apps.googleusercontent.com",
   },
 }
