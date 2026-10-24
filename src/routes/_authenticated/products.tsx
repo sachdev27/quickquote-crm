@@ -21,6 +21,7 @@ import { Card, Chips, Field, inputCls } from "@/components/qq";
 import { Switch } from "@/components/ui/switch";
 import { BulkHsn } from "@/components/bulk-hsn";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
 import {
   bulkUpdateRates,
@@ -2782,8 +2783,8 @@ function ProductList({
   const [cat, setCat] = useState<"all" | Category>("all");
   const [q, setQ] = useState("");
   // Per-column filters in the table header ("" = any).
-  const [colF, setColF] = useState({ name: "", grade: "", pn: "", roll: "", hsn: "" });
-  const colActive = Object.values(colF).some(Boolean);
+  const [colF, setColF] = useState<Record<ColKey, string[]>>(NO_COLF);
+  const colActive = Object.values(colF).some((v) => v.length);
   const [withGst, setWithGst] = useState(false);
   const [view, setView] = useState<"list" | "matrix">("list");
   const [sel, setSel] = useState<Set<string>>(new Set()); // ticked products (list view)
@@ -2831,13 +2832,13 @@ function ProductList({
     }
   }
 
+  const inCol = (k: ColKey, v: string) => !colF[k].length || colF[k].includes(v);
   const matchesCols = (p: Product) =>
-    (!colF.name ||
-      `${p.name} ${p.size_mm ?? ""}`.toLowerCase().includes(colF.name.toLowerCase())) &&
-    (!colF.grade || (p.grade ?? "—") === colF.grade) &&
-    (!colF.pn || pnLabel(p) === colF.pn) &&
-    (!colF.roll || rollLabel(p) === colF.roll) &&
-    (!colF.hsn || (p.hsn ?? "—") === colF.hsn);
+    inCol("group", sectionOf(p)) &&
+    inCol("grade", p.grade ?? "—") &&
+    inCol("pn", pnLabel(p)) &&
+    inCol("roll", rollLabel(p)) &&
+    inCol("hsn", p.hsn ?? "—");
   const sections = useMemo(() => {
     const m = new Map<string, Product[]>();
     for (const p of products) {
@@ -3162,7 +3163,7 @@ function ProductList({
                   <button
                     type="button"
                     className="ml-2 font-semibold text-primary hover:underline"
-                    onClick={() => setColF({ name: "", grade: "", pn: "", roll: "", hsn: "" })}
+                    onClick={() => setColF(NO_COLF)}
                   >
                     Clear filters · {visibleIds.length} shown
                   </button>
@@ -3176,8 +3177,9 @@ function ProductList({
                       <th className="py-2 pr-3 font-semibold">
                         <HeadFilter
                           label="Product"
-                          value={colF.name}
-                          onChange={(v) => setColF({ ...colF, name: v })}
+                          value={colF.group}
+                          options={choices(sectionOf)}
+                          onChange={(v) => setColF({ ...colF, group: v })}
                         />
                       </th>
                       {(
@@ -3714,7 +3716,10 @@ function PresetPreview({
 }
 
 // Inline weight edit; saves on blur/Enter.
-// Column header with a funnel: a native select (or, without options, a text box) for that column.
+type ColKey = "group" | "grade" | "pn" | "roll" | "hsn";
+const NO_COLF: Record<ColKey, string[]> = { group: [], grade: [], pn: [], roll: [], hsn: [] };
+
+// Column header with a funnel: click for every available value with a checkbox each (none ticked = all).
 function HeadFilter({
   label,
   value,
@@ -3722,53 +3727,54 @@ function HeadFilter({
   onChange,
 }: {
   label: string;
-  value: string;
-  options?: string[];
-  onChange: (v: string) => void;
+  value: string[];
+  options: string[];
+  onChange: (v: string[]) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const funnel = (
-    <Funnel
-      className={`h-3 w-3 ${value ? "fill-primary text-primary" : "text-muted-foreground/60"}`}
-    />
-  );
-  if (!options)
-    return open || value ? (
-      <input
-        autoFocus={open}
-        aria-label={`Filter ${label}`}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={() => setOpen(false)}
-        placeholder={`Filter ${label.toLowerCase()}…`}
-        className={`${colInput} normal-case`}
-      />
-    ) : (
-      <button
-        type="button"
-        className="inline-flex items-center gap-1"
-        onClick={() => setOpen(true)}
-      >
-        {label} {funnel}
-      </button>
-    );
+  const toggle = (o: string) =>
+    onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o]);
   return (
-    <span className={`relative inline-flex items-center gap-1 ${value ? "text-primary" : ""}`}>
-      {label} {value && <span className="normal-case">: {value}</span>} {funnel}
-      <select
+    <Popover>
+      <PopoverTrigger
         aria-label={`Filter ${label}`}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 w-full cursor-pointer opacity-0"
+        className={`inline-flex items-center gap-1 uppercase ${value.length ? "text-primary" : ""}`}
       >
-        <option value="">All</option>
-        {options.map((v) => (
-          <option key={v} value={v}>
-            {v}
-          </option>
-        ))}
-      </select>
-    </span>
+        {label}
+        <Funnel
+          className={`h-3 w-3 ${value.length ? "fill-primary text-primary" : "text-muted-foreground/60"}`}
+        />
+        {value.length > 0 && <span className="normal-case">({value.length})</span>}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-64 p-2 normal-case tracking-normal text-foreground"
+      >
+        <div className="mb-1 flex justify-between px-1 text-xs font-semibold text-primary">
+          <button type="button" onClick={() => onChange(options)}>
+            Select all
+          </button>
+          <button type="button" onClick={() => onChange([])}>
+            Clear (show all)
+          </button>
+        </div>
+        <div className="max-h-72 overflow-y-auto">
+          {options.map((o) => (
+            <label
+              key={o}
+              className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-secondary"
+            >
+              <input
+                type="checkbox"
+                checked={value.includes(o)}
+                onChange={() => toggle(o)}
+                className="h-4 w-4 accent-[var(--primary)]"
+              />
+              {o}
+            </label>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
