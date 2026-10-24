@@ -25,3 +25,13 @@ describe("fittingKind", () => {
     expect(fittingKind("Something else")).toBeNull();
   });
 });
+
+import { matchesSearch } from "@/lib/catalog";
+describe("matchesSearch", () => {
+  it("ignores spaces, hyphens and word order", () => {
+    expect(matchesSearch("4-way 63 mm Electrofusion", "4 way")).toBe(true);
+    expect(matchesSearch("4-way 63 mm Electrofusion", "63 4way")).toBe(true);
+    expect(matchesSearch("Saddle with bottom 90 × 25 mm", "saddle with 90")).toBe(true);
+    expect(matchesSearch("Tee 63 mm", "4 way")).toBe(false);
+  });
+});

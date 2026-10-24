@@ -24,6 +24,7 @@ import {
 import {
   LAST_BRAND,
   LAST_PRESET,
+  matchesSearch,
   newPipe,
   normalizePn,
   quoteTitle,
@@ -602,8 +603,8 @@ function NewQuote() {
         const hay = quoteTitle(p, brands.data?.find((b) => b.id === bid)?.name).toLowerCase();
         return (text.length > 0 || nums.length > 0) && text.every((t) => hay.includes(t));
       }
-      if (nums.length > 1 || grade || roll) return false;
-      return text.length > 0 && text.every((t) => p.name.toLowerCase().includes(t));
+      // fittings: every word (numbers too) in the name or family, e.g. "4 way 63", "saddle with 90"
+      return words.length > 0 && matchesSearch(`${p.name} ${p.grade ?? ""}`, words.join(" "));
     });
     // exact size match first, then catalog order
     out.sort(
@@ -612,7 +613,7 @@ function NewQuote() {
     const qty = (p: Product) => {
       const len = (p.roll_lengths ?? "").split("/").map(Number).find(Boolean);
       if (qtyTok?.endsWith("m")) return Number(qtyTok.slice(0, -1));
-      const n = qtyTok ? Number(qtyTok.slice(1)) : p.category === "pipe" ? 1 : Number(nums[0]) || 1;
+      const n = qtyTok ? Number(qtyTok.slice(1)) : 1;
       return p.unit === "m" ? n * (len ?? 100) : n;
     };
     // the line's brand: a sprinkler's own, else the typed brand, else the quote's
@@ -633,7 +634,7 @@ function NewQuote() {
       ? `${p.size_mm} mm${p.inch ? ` (${p.inch})` : ""} · PN ${pnNumber(p.pn) || p.pn} · ${p.grade} · ${p.roll === "cut" ? "Cut roll" : "Roll"}`
       : p.category === "sprinkler"
         ? quoteTitle(p)
-        : p.name;
+        : `${p.name}${p.grade ? ` · ${p.grade}` : ""}`;
   function addFromCatalogQty(p: Product, qty: number, bid?: string) {
     const lb = p.brand_id || bid || brandId;
     const existing = lines.find((l) => l.productId === p.id && lineBrandId(l) === lb);
@@ -938,17 +939,22 @@ function NewQuote() {
                             className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${i === qi ? "bg-primary/10" : ""}`}
                           >
                             <span className="min-w-0 truncate">
-                              <b>{brandName(s.bid)}</b> {suggestLabel(s.p)}
+                              {s.p.category !== "fitting" && <b>{brandName(s.bid)} </b>}
+                              {suggestLabel(s.p)}
                             </span>
                             <span className="shrink-0 tabular-nums text-muted-foreground">
                               {fmtNum(s.qty)} {UNIT_LABELS[s.p.unit as Unit]} ·{" "}
-                              <b className="text-foreground">
-                                ₹
-                                {fmtNum(
-                                  s.p.weight_kg * rateOf(s.p.rate_group_id, s.p.weight_kg, s.bid),
-                                )}
-                                /{UNIT_LABELS[s.p.unit as Unit]}
-                              </b>
+                              {s.p.weight_kg > 0 ? (
+                                <b className="text-foreground">
+                                  ₹
+                                  {fmtNum(
+                                    s.p.weight_kg * rateOf(s.p.rate_group_id, s.p.weight_kg, s.bid),
+                                  )}
+                                  /{UNIT_LABELS[s.p.unit as Unit]}
+                                </b>
+                              ) : (
+                                "type price"
+                              )}
                             </span>
                           </button>
                         </li>

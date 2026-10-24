@@ -67,9 +67,14 @@ export const normalizePn = (s: string) => {
 // Printed description of a catalog product: Brand (pipes, sprinklers) · name · PN rating, each only if
 // present and not already written in the name.
 export const quoteTitle = (
-  p: { category: string; name: string; pn: string | null },
+  p: { category: string; name: string; pn: string | null; grade?: string | null },
   brand?: string,
 ) => {
+  // fittings: "4-way 63 mm · Electrofusion" (the family tells electrofusion and spigot apart)
+  if (p.category === "fitting")
+    return p.grade && !p.name.toLowerCase().includes(p.grade.toLowerCase())
+      ? `${p.name} · ${p.grade}`
+      : p.name;
   const has = (t: string) => p.name.toLowerCase().includes(t.toLowerCase());
   const pn = p.pn ? normalizePn(p.pn) : "";
   return [
@@ -80,4 +85,15 @@ export const quoteTitle = (
   ]
     .filter(Boolean)
     .join(" ");
+};
+
+// Search: every typed word must appear, ignoring case, spaces and punctuation ("4 way" finds "4-way 63 mm").
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9.]/g, "");
+export const matchesSearch = (haystack: string, query: string) => {
+  const h = squash(haystack);
+  return query
+    .split(/\s+/)
+    .map(squash)
+    .filter(Boolean)
+    .every((t) => h.includes(t));
 };

@@ -42,7 +42,15 @@ import {
   saveRate,
   setProductWeight,
 } from "@/data/api";
-import { LAST_BRAND, LAST_PRESET, newPipe, normalizePn, sectionOf, shortName } from "@/lib/catalog";
+import {
+  LAST_BRAND,
+  LAST_PRESET,
+  matchesSearch,
+  newPipe,
+  normalizePn,
+  sectionOf,
+  shortName,
+} from "@/lib/catalog";
 import {
   CATEGORY_LABELS,
   GST_OPTIONS,
@@ -2880,11 +2888,7 @@ function ProductList({
     const m = new Map<string, Product[]>();
     for (const p of products) {
       if (cat !== "all" && p.category !== cat) continue;
-      if (
-        q &&
-        !`${p.name} ${p.size_mm ?? ""} ${p.grade ?? ""}`.toLowerCase().includes(q.toLowerCase())
-      )
-        continue;
+      if (q && !matchesSearch(`${p.name} ${p.size_mm ?? ""} ${p.grade ?? ""}`, q)) continue;
       if (!matchesCols(p)) continue;
       const k = sectionOf(p);
       m.set(k, [...(m.get(k) ?? []), p]);
@@ -3183,7 +3187,7 @@ function ProductList({
                 (p) =>
                   p.category !== "fitting" &&
                   (cat === "all" || p.category === cat) &&
-                  (!q || `${p.name} ${p.size_mm ?? ""}`.toLowerCase().includes(q.toLowerCase())) &&
+                  (!q || matchesSearch(`${p.name} ${p.size_mm ?? ""}`, q)) &&
                   matchesCols(p),
               )}
               rateOf={rateOf}

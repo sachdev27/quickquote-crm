@@ -188,11 +188,16 @@ export function FittingForm({
       </datalist>
       {def?.pair ? (
         <div className="grid grid-cols-2 gap-2">
-          {sizeInput(size, setSize, product === "Saddle" ? "Pipe (mm)" : "Large (mm)", "90")}
+          {sizeInput(
+            size,
+            setSize,
+            product.startsWith("Saddle") ? "Pipe (mm)" : "Large (mm)",
+            "90",
+          )}
           {sizeInput(
             size2,
             setSize2,
-            product === "Saddle" ? "Outlet (mm)" : "Small (mm)",
+            product.startsWith("Saddle") ? "Outlet (mm)" : "Small (mm)",
             "63",
             "fitting-sizes-2",
           )}
