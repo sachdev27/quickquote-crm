@@ -9,6 +9,7 @@ const MAX_TOTAL_BYTES = 15 * 1024 * 1024;
 const MAX_SHEETS = 10;
 const MAX_ROWS = 5000;
 const MAX_COLS = 256;
+const MAX_CELL_CHARS = 1000;
 
 function safeUnzip(bytes: Uint8Array, wanted: (name: string) => boolean) {
   let total = 0;
@@ -106,16 +107,16 @@ export function xlsxToText(bytes: Uint8Array): string {
     ...strFromU8(files["xl/sharedStrings.xml"] ?? new Uint8Array()).matchAll(
       /<si>([\s\S]*?)<\/si>/g,
     ),
-  ].map((m) => textRuns(m[1] ?? ""));
+  ].map((m) => textRuns(m[1] ?? "").slice(0, MAX_CELL_CHARS));
   const sheets = Object.keys(files)
     .filter((n) => n.startsWith("xl/worksheets/"))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     .slice(0, MAX_SHEETS);
   if (!sheets.length) throw new Error("That does not look like an .xlsx file");
+  let chars = 0; // output budget shared by every sheet
   return sheets
     .map((name, si) => {
       const rows: string[] = [];
-      let chars = 0;
       for (const r of strFromU8(files[name]!).matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
         const cells: string[] = [];
         for (const c of (r[1] ?? "").matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
@@ -131,7 +132,7 @@ export function xlsxToText(bytes: Uint8Array): string {
                 ? textRuns(body)
                 : decode(v ?? "");
           const col = colIndex(ref);
-          if (col < MAX_COLS) cells[col] = val;
+          if (col < MAX_COLS) cells[col] = val.slice(0, MAX_CELL_CHARS);
         }
         const line = Array.from(cells, (x) => x ?? "")
           .join("\t")

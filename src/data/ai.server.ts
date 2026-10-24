@@ -1,5 +1,13 @@
 import type { Env } from "./env.server";
-import type { InboundMessage } from "@/lib/ai/inbound";
+import { extractionSchema, type InboundMessage } from "@/lib/ai/inbound";
+import {
+  MAX_TEXT_CHARS,
+  classify,
+  docxToText,
+  fromBase64,
+  htmlToText,
+  xlsxToText,
+} from "@/lib/ai/files";
 
 // One interface for every model vendor. To add OpenAI or Claude, implement `extractJson` and register
 // it below; nothing else in the pipeline changes. Select with the AI_PROVIDER variable.
@@ -76,3 +84,48 @@ Rules:
 - qty is the number requested. unit "m" for metres/mtr, "rolls" for coils/rolls/bundles, "pc" for pieces/nos, "kg" for weight.
 - Never invent a price, size or quantity that is not in the input. Use null for anything unknown.
 - "customer" is the person or company asking for the quotation (not our company). "notes" holds delivery place, deadlines or special conditions.`;
+
+// PDFs, photos and voice notes go to the model as they are; Word, Excel and text-like files are read
+// to text here and appended to the message, so the provider only ever sees text plus inline media.
+async function prepare(data: InboundMessage): Promise<InboundMessage> {
+  const attachments: InboundMessage["attachments"] = [];
+  const extra: string[] = [];
+  for (const a of data.attachments) {
+    const c = classify(a.name, a.mime);
+    if (!c) throw new Error(`${a.name}: unsupported file type`);
+    if (c.kind === "inline") {
+      attachments.push({ name: a.name, mime: c.mime, base64: a.base64 });
+      continue;
+    }
+    const bytes = fromBase64(a.base64);
+    let body: string;
+    try {
+      body =
+        c.kind === "docx"
+          ? docxToText(bytes)
+          : c.kind === "xlsx"
+            ? xlsxToText(bytes)
+            : /\.html?$/i.test(a.name) || c.mime === "text/html"
+              ? htmlToText(new TextDecoder().decode(bytes))
+              : new TextDecoder().decode(bytes);
+    } catch (e) {
+      throw new Error(`${a.name}: ${e instanceof Error ? e.message : "could not be read"}`);
+    }
+    extra.push(`--- Attachment: ${a.name} ---\n${body}`);
+  }
+  const text = [data.text, ...extra].filter(Boolean).join("\n\n").slice(0, MAX_TEXT_CHARS);
+  return { ...data, text, attachments };
+}
+
+// The whole pipeline for one enquiry from any source (upload now, Gmail, a future mailbox poll).
+export async function runExtraction(env: Env, data: InboundMessage) {
+  const provider = getProvider(env);
+  const raw = await provider.extractJson({ system: EXTRACT_SYSTEM, message: await prepare(data) });
+  let json: unknown;
+  try {
+    json = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  } catch {
+    throw new Error("The AI reply was not valid JSON, try again");
+  }
+  return { provider: provider.name, extraction: extractionSchema.parse(json) };
+}

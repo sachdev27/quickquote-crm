@@ -53,3 +53,21 @@ pricing, never from the model.
 - Optional: `AI_MODEL` (default `gemini-3.5-flash-lite`) and `AI_PROVIDER` (default `gemini`).
 - Another vendor: implement `AiProvider` in `src/data/ai.server.ts` and register it in `PROVIDERS`.
 - Mailbox later: poll the inbox, build an `InboundMessage` (`src/lib/ai/inbound.ts`) and call the same pipeline.
+
+### Gmail inbox for AI Quote (sales@tarko.in)
+
+The **Gmail inbox** tab lists emails from one shared mailbox and sends the chosen one (body plus
+PDF/Word/Excel/image attachments) through the same AI pipeline. Read-only (`gmail.readonly`); no DNS or
+MX changes, so Workspace mail is untouched.
+
+1. Google Cloud Console → new project → enable **Gmail API**.
+2. **OAuth consent screen** → user type **Internal** (Workspace only, no Google review needed).
+3. **Credentials → OAuth client ID → Web application**, authorised redirect URI
+   `https://crm.tarko.in/gmail-callback`.
+4. Cloudflare secrets: `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (`wrangler secret put ...`).
+5. Optional variables: `GMAIL_ACCOUNT` (default `sales@tarko.in`, the only mailbox that can be connected)
+   and `GMAIL_LABEL` (default `Quotes`).
+6. In the CRM, an admin opens AI Quote → Gmail inbox → **Connect**. Give the label `Quotes` to enquiry emails.
+
+Non-admins only see emails carrying the label; admins can switch to the whole inbox. The refresh token is
+stored AES-GCM encrypted in the `settings` table and is never sent to the browser.
