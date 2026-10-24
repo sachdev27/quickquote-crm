@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Copy,
   Download,
+  Funnel,
   Plus,
   Printer,
   SlidersHorizontal,
@@ -171,6 +172,7 @@ function ProductsAdmin() {
   const scoped = pricing.data && {
     ...pricing.data,
     rates: pricing.data.rates.filter((r) => r.profile_id === profileId),
+    brandRaw: pricing.data.brandRaw.filter((b) => b.profile_id === profileId),
   };
   // Grid can show any brand's effective ₹/kg: that brand's raw (if set) replaces the preset raw.
   const [viewBrand, setViewBrand] = useState("");
@@ -204,9 +206,13 @@ function ProductsAdmin() {
   const profileName = (id: string) => pricing.data?.profiles.find((p) => p.id === id)?.name ?? "";
   const rateRow = (preset: string, group: string) =>
     scoped?.rates.find((r) => r.preset_id === preset && r.group_id === group);
-  const rateOf = (group: string, weightKg = 0) => {
+  const rateOf = (group: string, weightKg = 0, brandId?: string | null) => {
     const r = rateRow(presetId, group);
-    return r ? rateKgFor(r, group, weightKg) : 0;
+    if (!r) return 0;
+    const b = brandId
+      ? scoped?.brandRaw.find((x) => x.brand_id === brandId && x.group_id === group)
+      : undefined;
+    return rateKgFor(withBrandRaw(r, b), group, weightKg);
   };
 
   const editRate = (preset: string, g: { id: string; name: string }) => {
@@ -355,6 +361,7 @@ function ProductsAdmin() {
           roll_lengths: p.roll_lengths ?? null,
           hsn: p.hsn ?? null,
           size_mm: p.size_mm ?? null,
+          brand_id: p.category === "sprinkler" ? (p.brand_id ?? null) : null,
           unit: (p.unit ?? "pc") as Unit,
           weight_kg: n(p.weight),
           gst_rate: p.gst_rate ?? 18,
@@ -397,6 +404,10 @@ function ProductsAdmin() {
   const presetName = (id: string) => pricing.data?.presets.find((p) => p.id === id)?.name ?? "";
 
   // Product editor: bottom sheet on phones, the right-hand pane on desktop.
+  const removeProduct = () =>
+    confirm("Remove this product from the catalog?") && submitProduct(null, false);
+  // the product side pane (desktop, Products tab) vs. a dialog/sheet opened from elsewhere
+  const inPane = desktop && tab === "products";
   const productForm = prod && (
     <form onSubmit={submitProduct} className="@container flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4 @2xl:grid @2xl:grid-cols-2 @2xl:items-start @2xl:gap-x-6 @2xl:gap-y-4 @2xl:space-y-0">
@@ -436,6 +447,19 @@ function ProductsAdmin() {
             }))}
           />
         </Field>
+        {prod.category === "sprinkler" && (
+          <Field label="Brand (weights and raw rate belong to a brand)">
+            <Chips
+              label="Brand"
+              value={prod.brand_id ?? ""}
+              onChange={(id) => setProd({ ...prod, brand_id: id || null })}
+              options={[
+                { value: "", label: "Any brand" },
+                ...(brands.data ?? []).map((b) => ({ value: b.id, label: b.name })),
+              ]}
+            />
+          </Field>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <Field label="Size (mm)">
             <input
@@ -444,7 +468,7 @@ function ProductsAdmin() {
               onChange={(e) =>
                 setProd({
                   ...prod,
-                  size_mm: e.target.value ? Number(e.target.value) : null,
+                  size_mm: Math.round(Number(e.target.value.replace(/\D/g, ""))) || null,
                 })
               }
               className={inputCls}
@@ -544,28 +568,72 @@ function ProductsAdmin() {
         <div className="flex items-baseline justify-between rounded-xl bg-secondary px-4 py-3 tabular-nums">
           <span className="text-sm text-muted-foreground">
             {fmtNum(n(prod.weight), 3)} kg ×{" "}
-            {fmtMoney(rateOf(prod.rate_group_id ?? "", n(prod.weight)))}/kg ({presetName(presetId)})
+            {fmtMoney(rateOf(prod.rate_group_id ?? "", n(prod.weight), prod.brand_id))}/kg (
+            {presetName(presetId)}
+            {prod.brand_id
+              ? ` · ${brands.data?.find((b) => b.id === prod.brand_id)?.name ?? ""} raw`
+              : ""}
+            )
           </span>
           <span className="text-xl font-bold">
-            {fmtMoney(rateOf(prod.rate_group_id ?? "", n(prod.weight)) * n(prod.weight))}
+            {fmtMoney(
+              rateOf(prod.rate_group_id ?? "", n(prod.weight), prod.brand_id) * n(prod.weight),
+            )}
             <span className="text-sm font-medium text-muted-foreground">
               /{UNIT_LABELS[(prod.unit ?? "pc") as Unit]}
             </span>
           </span>
         </div>
+        {prod.rate_group_id === "SPRINKLER" &&
+          (() => {
+            // sprinkler pipe: ₹ per piece = raw ₹/kg × piece weight + production ₹ + margin ₹ (both flat per piece)
+            const r = rateRow(presetId, "SPRINKLER");
+            if (!r) return null;
+            const b = prod.brand_id
+              ? scoped?.brandRaw.find(
+                  (x) => x.brand_id === prod.brand_id && x.group_id === "SPRINKLER",
+                )
+              : undefined;
+            const raw = withBrandRaw(r, b).raw_kg;
+            const w = n(prod.weight);
+            return (
+              <p className="rounded-xl border border-dashed border-border p-3 text-xs leading-relaxed text-muted-foreground tabular-nums">
+                How this price is worked out ({presetName(presetId)}
+                {prod.brand_id
+                  ? `, ${brands.data?.find((x) => x.id === prod.brand_id)?.name ?? ""} raw`
+                  : ""}
+                ): raw ₹{fmtNum(raw)}/kg × {fmtNum(w, 3)} kg = {fmtMoney(raw * w)} + production{" "}
+                {fmtMoney(r.production_kg)} + margin {fmtMoney(r.margin)} ={" "}
+                <b className="text-foreground">{fmtMoney(raw * w + r.production_kg + r.margin)}</b>{" "}
+                per piece. Change these under Pricing.
+              </p>
+            );
+          })()}
       </div>
       <div className="flex gap-2 border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        {prod.id && (
+        {/* in the desktop side pane the trash sits in the pane header; in a dialog/sheet it lives here */}
+        {inPane ? (
           <Button
             type="button"
             variant="outline"
             className="h-12 rounded-xl"
-            onClick={() =>
-              confirm("Remove this product from the catalog?") && submitProduct(null, false)
-            }
+            onClick={() => setProd(null)}
           >
-            Remove
+            Close
           </Button>
+        ) : (
+          prod.id && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 rounded-xl"
+              aria-label="Remove product"
+              title="Remove product"
+              onClick={removeProduct}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )
         )}
         <Button type="submit" className="h-12 flex-1 rounded-xl text-base font-semibold">
           Save product
@@ -672,13 +740,17 @@ function ProductsAdmin() {
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="flex items-center justify-between px-4 pt-4">
                     <p className="font-semibold">{prod.id ? "Edit product" : "New product"}</p>
-                    <button
-                      type="button"
-                      className="text-sm text-muted-foreground hover:text-foreground"
-                      onClick={() => setProd(null)}
-                    >
-                      Close
-                    </button>
+                    {prod.id && (
+                      <button
+                        type="button"
+                        aria-label="Remove product"
+                        title="Remove product"
+                        className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-destructive"
+                        onClick={removeProduct}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                   {prod.id && <PresetPreview product={prod} pricing={scoped} />}
                   <div className="flex min-h-0 flex-1 flex-col pt-3">{productForm}</div>
@@ -2672,7 +2744,7 @@ function ProductList({
   pricing: Pricing | undefined;
   presetId: string;
   onPreset: (id: string) => void;
-  rateOf: (group: string, weightKg?: number) => number;
+  rateOf: (group: string, weightKg?: number, brandId?: string | null) => number;
   onSaveWeight: (p: Product, v: string) => Promise<void>;
   onEdit: (p: Product) => void;
   onAdd: () => void;
@@ -2997,7 +3069,7 @@ function ProductList({
           >
             <ul className="-my-1 divide-y divide-border/60">
               {items.map((p) => {
-                const rate = rateOf(p.rate_group_id, p.weight_kg);
+                const rate = rateOf(p.rate_group_id, p.weight_kg, p.brand_id);
                 const up = rate * p.weight_kg;
                 return (
                   <li key={p.id} className="flex items-center gap-3 py-2">
@@ -3056,34 +3128,26 @@ function ProductList({
               <p className="text-sm text-muted-foreground">
                 {products.length} products · price = weight × preset ₹/kg
                 {withGst ? " · incl. GST" : ""}
+                {colActive && (
+                  <button
+                    type="button"
+                    className="ml-2 font-semibold text-primary hover:underline"
+                    onClick={() => setColF({ name: "", grade: "", pn: "", roll: "", hsn: "" })}
+                  >
+                    Clear filters · {visibleIds.length} shown
+                  </button>
+                )}
               </p>
               <div className="overflow-x-auto">
                 <table className="w-full tabular-nums">
                   <thead className="sticky top-0 bg-card">
                     <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
                       <th className="w-7 py-2 pr-1">{tick(visibleIds, "Select all products")}</th>
-                      <th className="py-2 pr-3 font-semibold">Product</th>
-                      <th className="px-2 font-semibold">Grade</th>
-                      <th className="px-2 font-semibold">PN</th>
-                      <th className="px-2 font-semibold">Roll</th>
-                      <th className="px-2 font-semibold">HSN/SAC</th>
-                      <th className="px-2 text-right font-semibold">Weight</th>
-                      {pricing?.presets.map((pr) => (
-                        <th key={pr.id} className="px-2 text-right font-semibold normal-case">
-                          {pr.name}{" "}
-                          <span className="font-normal text-muted-foreground">₹/unit</span>
-                        </th>
-                      ))}
-                    </tr>
-                    <tr className="border-b border-border">
-                      <th className="py-1.5" />
-                      <th className="py-1.5 pr-3">
-                        <input
-                          aria-label="Filter product"
+                      <th className="py-2 pr-3 font-semibold">
+                        <HeadFilter
+                          label="Product"
                           value={colF.name}
-                          onChange={(e) => setColF({ ...colF, name: e.target.value })}
-                          placeholder="Filter…"
-                          className={colInput}
+                          onChange={(v) => setColF({ ...colF, name: v })}
                         />
                       </th>
                       {(
@@ -3094,38 +3158,22 @@ function ProductList({
                           ["hsn", "HSN/SAC", (p: Product) => p.hsn ?? "—"],
                         ] as const
                       ).map(([k, label, f]) => (
-                        <th key={k} className="px-2 py-1.5">
-                          <select
-                            aria-label={`Filter ${label}`}
+                        <th key={k} className="px-2 font-semibold">
+                          <HeadFilter
+                            label={label}
                             value={colF[k]}
-                            onChange={(e) => setColF({ ...colF, [k]: e.target.value })}
-                            className={`${colInput} ${colF[k] ? "border-primary text-primary" : ""}`}
-                          >
-                            <option value="">All</option>
-                            {choices(f).map((v) => (
-                              <option key={v} value={v}>
-                                {v}
-                              </option>
-                            ))}
-                          </select>
+                            options={choices(f)}
+                            onChange={(v) => setColF({ ...colF, [k]: v })}
+                          />
                         </th>
                       ))}
-                      <th
-                        colSpan={1 + (pricing?.presets.length ?? 0)}
-                        className="px-2 py-1.5 text-right"
-                      >
-                        {colActive && (
-                          <button
-                            type="button"
-                            className="text-xs font-semibold normal-case text-primary hover:underline"
-                            onClick={() =>
-                              setColF({ name: "", grade: "", pn: "", roll: "", hsn: "" })
-                            }
-                          >
-                            Clear filters · {visibleIds.length} shown
-                          </button>
-                        )}
-                      </th>
+                      <th className="py-2 pl-2 pr-4 text-right font-semibold">Weight</th>
+                      {pricing?.presets.map((pr) => (
+                        <th key={pr.id} className="px-2 text-right font-semibold normal-case">
+                          {pr.name}{" "}
+                          <span className="font-normal text-muted-foreground">₹/unit</span>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
@@ -3188,8 +3236,14 @@ function ProductList({
                                 const r = pricing.rates.find(
                                   (x) => x.preset_id === pr.id && x.group_id === p.rate_group_id,
                                 );
+                                const br = p.brand_id
+                                  ? pricing.brandRaw.find(
+                                      (x) =>
+                                        x.brand_id === p.brand_id && x.group_id === p.rate_group_id,
+                                    )
+                                  : undefined;
                                 const up = r
-                                  ? rateKgFor(r, p.rate_group_id, p.weight_kg) *
+                                  ? rateKgFor(withBrandRaw(r, br), p.rate_group_id, p.weight_kg) *
                                     p.weight_kg *
                                     (withGst ? 1 + p.gst_rate / 100 : 1)
                                   : 0;
@@ -3456,13 +3510,15 @@ function ProductMatrix({
   onPick,
 }: {
   products: Product[];
-  rateOf: (group: string, weightKg?: number) => number;
+  rateOf: (group: string, weightKg?: number, brandId?: string | null) => number;
   withGst: boolean;
   selectedId: string;
   onPick: (p: Product) => void;
 }) {
   const price = (p: Product) =>
-    rateOf(p.rate_group_id, p.weight_kg) * p.weight_kg * (withGst ? 1 + p.gst_rate / 100 : 1);
+    rateOf(p.rate_group_id, p.weight_kg, p.brand_id) *
+    p.weight_kg *
+    (withGst ? 1 + p.gst_rate / 100 : 1);
   const pipes = products.filter((p) => p.category === "pipe");
   const others = products.filter((p) => p.category !== "pipe");
   const tables = [...new Set(pipes.map((p) => `${p.grade ?? ""}|${p.roll ?? "complete"}`))].map(
@@ -3606,7 +3662,12 @@ function PresetPreview({
             const r = pricing.rates.find(
               (x) => x.preset_id === pr.id && x.group_id === product.rate_group_id,
             );
-            const kg = r ? rateKgFor(r, product.rate_group_id ?? "", w) : 0;
+            const br = product.brand_id
+              ? pricing.brandRaw.find(
+                  (x) => x.brand_id === product.brand_id && x.group_id === product.rate_group_id,
+                )
+              : undefined;
+            const kg = r ? rateKgFor(withBrandRaw(r, br), product.rate_group_id ?? "", w) : 0;
             return (
               <tr key={pr.id} className="border-t border-border/60">
                 <td className="px-3 py-1.5 font-medium">{pr.name}</td>
@@ -3623,6 +3684,64 @@ function PresetPreview({
 }
 
 // Inline weight edit; saves on blur/Enter.
+// Column header with a funnel: a native select (or, without options, a text box) for that column.
+function HeadFilter({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options?: string[];
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const funnel = (
+    <Funnel
+      className={`h-3 w-3 ${value ? "fill-primary text-primary" : "text-muted-foreground/60"}`}
+    />
+  );
+  if (!options)
+    return open || value ? (
+      <input
+        autoFocus={open}
+        aria-label={`Filter ${label}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => setOpen(false)}
+        placeholder={`Filter ${label.toLowerCase()}…`}
+        className={`${colInput} normal-case`}
+      />
+    ) : (
+      <button
+        type="button"
+        className="inline-flex items-center gap-1"
+        onClick={() => setOpen(true)}
+      >
+        {label} {funnel}
+      </button>
+    );
+  return (
+    <span className={`relative inline-flex items-center gap-1 ${value ? "text-primary" : ""}`}>
+      {label} {value && <span className="normal-case">: {value}</span>} {funnel}
+      <select
+        aria-label={`Filter ${label}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 w-full cursor-pointer opacity-0"
+      >
+        <option value="">All</option>
+        {options.map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
 function WeightCell({
   value,
   unit,

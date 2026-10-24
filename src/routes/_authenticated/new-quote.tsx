@@ -208,10 +208,16 @@ function NewQuote() {
   };
   const presetName = (id: string) => pricing.data?.presets.find((p) => p.id === id)?.name ?? "";
 
-  // Sprinkler weights belong to a brand; a product with no brand is offered to every brand.
-  const catalog = (prods.data ?? []).filter(
-    (p) => p.category !== "sprinkler" || !p.brand_id || p.brand_id === brandId,
-  );
+  // Sprinkler weights belong to a brand. Every sprinkler product is listed (the quote's brand first); picking
+  // another brand's switches the whole quote to that brand, whose raw price and letterhead then apply.
+  const catalog = prods.data ?? [];
+  const brandName = (id?: string | null) => brands.data?.find((b) => b.id === id)?.name ?? "";
+  const switchToBrandOf = (p: Product) => {
+    if (p.category !== "sprinkler" || !p.brand_id || p.brand_id === brandId) return;
+    setBrandId(p.brand_id);
+    remember(LAST_BRAND, p.brand_id);
+    toast.message(`Quote brand changed to ${brandName(p.brand_id)} for this sprinkler pipe.`);
+  };
   const rateOf = (id: string | null, weightKg = 0) =>
     id ? formRate(rates[id], nonIsi, id, weightKg) : 0;
   // Lines priced with a separate non-ISI raw price are labelled so the quote never implies an ISI mark.
@@ -760,7 +766,12 @@ function NewQuote() {
             <CatalogPanel
               products={catalog}
               rateOf={rateOf}
-              onPick={addFromCatalog}
+              onPick={(p) => {
+                switchToBrandOf(p);
+                addFromCatalog(p);
+              }}
+              quoteBrandId={brandId}
+              brandName={brandName}
               onAddLine={(l) => addLine(l)}
               onMore={() => setSheet(true)}
               inQuote={new Set(lines.map((l) => l.productId ?? ""))}
@@ -1030,6 +1041,9 @@ function NewQuote() {
                   groups={pricing.data?.groups ?? []}
                   rateOf={rateOf}
                   onAdd={(l) => addLine(l)}
+                  quoteBrandId={brandId}
+                  brandName={brandName}
+                  onUseBrand={switchToBrandOf}
                 />
               )}
               <Button
@@ -1363,6 +1377,9 @@ function NewQuote() {
           groups={pricing.data?.groups ?? []}
           rateOf={rateOf}
           onAdd={(l) => addLine(l)}
+          quoteBrandId={brandId}
+          brandName={brandName}
+          onUseBrand={switchToBrandOf}
         />
       )}
     </PageShell>
@@ -1377,8 +1394,12 @@ function CatalogPanel({
   onAddLine,
   onMore,
   inQuote,
+  quoteBrandId,
+  brandName,
 }: {
   products: Product[];
+  quoteBrandId: string;
+  brandName: (id?: string | null) => string;
   rateOf: (id: string | null, weightKg?: number) => number;
   onPick: (p: Product) => void;
   onAddLine: (l: Line) => void;
@@ -1396,7 +1417,12 @@ function CatalogPanel({
   const rows = pipes.filter((p) => p.grade === g && (p.roll ?? "complete") === r);
   const sizes = uniq(rows.map((p) => p.size_mm ?? 0)).sort((a, b) => a - b);
   const pns = uniq(rows.map((p) => p.pn ?? "")).sort((a, b) => pnNumber(a) - pnNumber(b));
-  const others = products.filter((p) => p.category === cat);
+  // the quote's brand first; another brand's sprinkler switches the quote when picked
+  const foreign = (p: Product) =>
+    p.category === "sprinkler" && !!p.brand_id && p.brand_id !== quoteBrandId;
+  const others = products
+    .filter((p) => p.category === cat)
+    .sort((a, b) => Number(foreign(a)) - Number(foreign(b)));
   const unitPrice = (p: Product) => p.weight_kg * rateOf(p.rate_group_id, p.weight_kg);
 
   return (
@@ -1496,7 +1522,15 @@ function CatalogPanel({
               >
                 <span className="min-w-0 truncate text-sm font-medium">{p.name}</span>
                 <span className="shrink-0 text-sm font-semibold tabular-nums">
-                  ₹{fmtNum(unitPrice(p))}/{UNIT_LABELS[p.unit as Unit]}
+                  {foreign(p) ? (
+                    <span className="text-xs font-medium text-amber-700">
+                      switch to {brandName(p.brand_id)}
+                    </span>
+                  ) : (
+                    <>
+                      ₹{fmtNum(unitPrice(p))}/{UNIT_LABELS[p.unit as Unit]}
+                    </>
+                  )}
                 </span>
               </button>
             </li>
@@ -1553,7 +1587,13 @@ function AddItemSheet({
   rateOf,
   onAdd,
   inline,
+  quoteBrandId,
+  brandName,
+  onUseBrand,
 }: {
+  quoteBrandId: string;
+  brandName: (id?: string | null) => string;
+  onUseBrand: (p: Product) => void;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   products: Product[];
@@ -1701,7 +1741,11 @@ function AddItemSheet({
     toast.success(`${m} m saved as a roll length`);
   }
 
-  const listItems = products.filter((p) => p.category === cat);
+  const foreign = (p: Product) =>
+    p.category === "sprinkler" && !!p.brand_id && p.brand_id !== quoteBrandId;
+  const listItems = products
+    .filter((p) => p.category === cat)
+    .sort((a, b) => Number(foreign(a)) - Number(foreign(b)));
   const picked = listItems.find((p) => p.id === pickId) ?? listItems[0];
   const sel = cat === "pipe" ? pipe : cat === "custom" ? undefined : picked;
 
@@ -1773,6 +1817,7 @@ function AddItemSheet({
       cat === "pipe" && !customLen
         ? `${sel.name} · ${rolls} roll${rolls > 1 ? "s" : ""} × ${len} m`
         : sel.name;
+    onUseBrand(sel);
     onAdd({
       productId: sel.id,
       rateGroupId: sel.rate_group_id,
@@ -1789,7 +1834,11 @@ function AddItemSheet({
   }
 
   const perUnit = (p?: Product) =>
-    p ? `₹${fmtNum(unitPriceOf(p))}/${UNIT_LABELS[p.unit as Unit]}` : "";
+    p
+      ? foreign(p)
+        ? `switch to ${brandName(p.brand_id)}`
+        : `₹${fmtNum(unitPriceOf(p))}/${UNIT_LABELS[p.unit as Unit]}`
+      : "";
 
   const body = (
     <>
@@ -2001,6 +2050,7 @@ function AddItemSheet({
                   <span className="min-w-0">
                     <span className="block font-medium">{shortName(p)}</span>
                     <span className="block text-xs text-muted-foreground tabular-nums">
+                      {p.brand_id ? `${brandName(p.brand_id)} · ` : ""}
                       {p.length_m ? `${p.length_m} m · ` : ""}
                       {fmtNum(p.weight_kg, 3)} kg
                     </span>
