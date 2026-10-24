@@ -535,6 +535,12 @@ function NewQuote() {
         if (roll && (p.roll ?? "complete") !== roll) return false;
         return text.every((t) => p.name.toLowerCase().includes(t));
       }
+      if (p.category === "sprinkler") {
+        if (nums[0] && !String(p.size_mm ?? "").startsWith(nums[0])) return false;
+        const bid = p.brand_id || brand?.id || brandId;
+        const hay = quoteTitle(p, brands.data?.find((b) => b.id === bid)?.name).toLowerCase();
+        return (text.length > 0 || nums.length > 0) && text.every((t) => hay.includes(t));
+      }
       if (nums.length > 1 || grade || roll) return false;
       return text.length > 0 && text.every((t) => p.name.toLowerCase().includes(t));
     });
@@ -569,7 +575,9 @@ function NewQuote() {
   const suggestLabel = (p: Product) =>
     p.category === "pipe"
       ? `${p.size_mm} mm${p.inch ? ` (${p.inch})` : ""} · PN ${pnNumber(p.pn) || p.pn} · ${p.grade} · ${p.roll === "cut" ? "Cut roll" : "Roll"}`
-      : p.name;
+      : p.category === "sprinkler"
+        ? quoteTitle(p)
+        : p.name;
   function addFromCatalogQty(p: Product, qty: number) {
     const existing = lines.find((l) => l.productId === p.id);
     if (existing) return patch(existing.key, { qty: existing.qty + qty });
@@ -1547,7 +1555,9 @@ function CatalogPanel({
                 onClick={() => onPick(p)}
                 className={`flex w-full items-center justify-between gap-2 rounded-md px-1 py-2 text-left hover:bg-secondary ${inQuote.has(p.id) ? "text-primary" : ""}`}
               >
-                <span className="min-w-0 truncate text-sm font-medium">{p.name}</span>
+                <span className="min-w-0 truncate text-sm font-medium">
+                  {quoteTitle(p, brandName(p.brand_id))}
+                </span>
                 <span className="shrink-0 text-sm font-semibold tabular-nums">
                   {foreign(p) ? (
                     <span className="text-xs font-medium text-amber-700">
@@ -2075,7 +2085,9 @@ function AddItemSheet({
                   className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left ${picked?.id === p.id ? "border-primary bg-primary/5" : "border-border"}`}
                 >
                   <span className="min-w-0">
-                    <span className="block font-medium">{shortName(p)}</span>
+                    <span className="block font-medium">
+                      {p.category === "sprinkler" ? quoteTitle(p) : shortName(p)}
+                    </span>
                     <span className="block text-xs text-muted-foreground tabular-nums">
                       {p.brand_id ? `${brandName(p.brand_id)} · ` : ""}
                       {p.length_m ? `${p.length_m} m · ` : ""}
