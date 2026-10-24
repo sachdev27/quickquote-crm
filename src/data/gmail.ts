@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { adminOnly, authed } from "./auth.server";
-import { getEnv } from "./env.server";
+import { getEnv, type Env } from "./env.server";
 import { runExtraction } from "./ai.server";
 import {
   GMAIL_SCOPE,
@@ -96,18 +96,35 @@ interface Hdr {
 const header = (h: Hdr[] | undefined, n: string) =>
   h?.find((x) => x.name.toLowerCase() === n)?.value ?? "";
 
+async function labelIdFor(env: Env) {
+  const labels = await gmailGet<{ labels: { id: string; name: string }[] }>(env, "labels");
+  const want = labels.labels.find((l) => l.name.toLowerCase() === gmailLabel(env).toLowerCase());
+  if (!want)
+    throw new Error(
+      `The Gmail label "${gmailLabel(env)}" does not exist yet. Create it in Gmail first.`,
+    );
+  return want.id;
+}
+
 export const gmailList = createServerFn({ method: "GET" })
   .middleware([authed])
   .validator(z.object({ q: z.string().max(100).default(""), all: z.boolean().default(false) }))
   .handler(async ({ data, context }) => {
     const env = await getEnv();
-    const scope =
-      data.all && context.role === "admin"
-        ? "in:inbox"
-        : `label:${gmailLabel(env).replace(/ /g, "-")}`;
+    const admin = context.role === "admin";
+    const whole = data.all && admin;
+    // Words only: no boolean keywords or negation, and they sit inside a group the user cannot close,
+    // so the search can never widen past the scope.
+    const terms = plain(data.q)
+      .split(" ")
+      .filter((w) => w && !/^(OR|AND|AROUND)$/i.test(w) && !w.startsWith("-"))
+      .join(" ");
+    const scope = whole ? "in:inbox" : `label:${gmailLabel(env).replace(/ /g, "-")}`;
     const list = await gmailGet<{ messages?: { id: string }[] }>(env, "messages", {
-      q: `${scope} ${plain(data.q)}`.trim(),
+      q: terms ? `${scope} (${terms})` : scope,
       maxResults: "20",
+      // belt and braces for staff: Gmail ANDs labelIds with q
+      ...(whole ? {} : { labelIds: await labelIdFor(env) }),
     });
     const rows = await Promise.all(
       (list.messages ?? []).map((m) =>
