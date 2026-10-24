@@ -20,6 +20,12 @@ describe("fittingKind", () => {
       ["Tail piece with flange 110 mm", "tailflange"],
       ["Tail piece 110 mm", "tail"],
       ["L.N pipe end 110 mm", "stubend"],
+      ["Elbow 90° PN 10 63 mm", "elbow90"],
+      ["Elbow 45° PN 6 180 mm", "elbow45"],
+      ["Tee PN 6 63 mm", "tee"],
+      ["4-way PN 10 63 mm", "cross"],
+      ["Y-way PN 6 63 mm", "ywye"],
+      ["Saddle with bottom 63 × 20 mm", "saddle"],
     ];
     for (const [name, kind] of cases) expect(fittingKind(name), name).toBe(kind);
     expect(fittingKind("Something else")).toBeNull();
@@ -33,5 +39,19 @@ describe("matchesSearch", () => {
     expect(matchesSearch("4-way 63 mm Electrofusion", "63 4way")).toBe(true);
     expect(matchesSearch("Saddle with bottom 90 × 25 mm", "saddle with 90")).toBe(true);
     expect(matchesSearch("Tee 63 mm", "4 way")).toBe(false);
+  });
+});
+
+import { splitFittingName } from "@/lib/fitting";
+describe("splitFittingName", () => {
+  it("keeps the pressure class in the product", () => {
+    expect(splitFittingName("Elbow 90° PN 10 63 mm")).toEqual({
+      product: "Elbow 90° PN 10",
+      size: "63",
+    });
+    expect(splitFittingName("Saddle with bottom 90 × 25 mm")).toEqual({
+      product: "Saddle with bottom",
+      size: "90x25",
+    });
   });
 });
