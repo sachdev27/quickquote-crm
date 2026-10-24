@@ -74,6 +74,7 @@ export const quoteTitle = (
   const pn = p.pn ? normalizePn(p.pn) : "";
   return [
     p.category === "sprinkler" && brand && !has(brand) ? brand : "",
+    p.category === "sprinkler" && !has("sprinkler") ? "Sprinkler Pipe" : "",
     p.name,
     pn && !has(pn) ? pn : "",
   ]
