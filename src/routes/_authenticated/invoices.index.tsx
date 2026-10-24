@@ -36,7 +36,9 @@ type SortOrder = "asc" | "desc";
 function InvoicesPage() {
   const [q, setQ] = useState("");
   const [brandFilter, setBrandFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState<"all" | "this-month" | "last-month" | "last-90">("all");
+  const [dateFilter, setDateFilter] = useState<"all" | "this-month" | "last-month" | "last-90">(
+    "all",
+  );
   const [sortField, setSortField] = useState<SortField>("invoice_date");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [page, setPage] = useState(1);
@@ -59,7 +61,7 @@ function InvoicesPage() {
   const filteredRows = useMemo(() => {
     const now = new Date();
     const currentYearMonth = now.toISOString().slice(0, 7);
-    
+
     // Previous month string
     const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const prevYearMonth = prevMonthDate.toISOString().slice(0, 7);
@@ -97,17 +99,15 @@ function InvoicesPage() {
   // Sorting
   const sortedRows = useMemo(() => {
     return [...filteredRows].sort((a, b) => {
-      let valA = a[sortField] ?? "";
-      let valB = b[sortField] ?? "";
+      const valA = a[sortField] ?? "";
+      const valB = b[sortField] ?? "";
 
       if (sortField === "total") {
-        return sortOrder === "asc" ? (a.total - b.total) : (b.total - a.total);
+        return sortOrder === "asc" ? a.total - b.total : b.total - a.total;
       }
 
       if (typeof valA === "string" && typeof valB === "string") {
-        return sortOrder === "asc"
-          ? valA.localeCompare(valB)
-          : valB.localeCompare(valA);
+        return sortOrder === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
       }
 
       return 0;
@@ -197,9 +197,7 @@ function InvoicesPage() {
             <span className="text-xs font-medium uppercase tracking-wider">Customers</span>
             <Building2 className="h-4 w-4 text-amber-600" />
           </div>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">
-            {uniqueCustomers}
-          </p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{uniqueCustomers}</p>
           <p className="text-[11px] text-muted-foreground">Distinct buyers billed</p>
         </div>
       </div>
@@ -302,7 +300,9 @@ function InvoicesPage() {
             <FileText className="h-6 w-6" />
           </div>
           <p className="font-semibold text-foreground">
-            {hasActiveFilters ? "No invoices match the selected filters" : "No tax invoices created yet"}
+            {hasActiveFilters
+              ? "No invoices match the selected filters"
+              : "No tax invoices created yet"}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             {hasActiveFilters
@@ -310,7 +310,12 @@ function InvoicesPage() {
               : "Open any won quotation and choose 'Create tax invoice' to generate invoices."}
           </p>
           {hasActiveFilters ? (
-            <Button variant="outline" size="sm" onClick={clearAllFilters} className="mt-4 rounded-xl">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearAllFilters}
+              className="mt-4 rounded-xl"
+            >
               Reset Filters
             </Button>
           ) : (
@@ -335,7 +340,11 @@ function InvoicesPage() {
                     <div className="flex items-center gap-1.5">
                       <span>Invoice</span>
                       {sortField === "invoice_no" ? (
-                        sortOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-primary" /> : <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        sortOrder === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-primary" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        )
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-40" />
                       )}
@@ -348,7 +357,11 @@ function InvoicesPage() {
                     <div className="flex items-center gap-1.5">
                       <span>Date</span>
                       {sortField === "invoice_date" ? (
-                        sortOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-primary" /> : <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        sortOrder === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-primary" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        )
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-40" />
                       )}
@@ -361,7 +374,11 @@ function InvoicesPage() {
                     <div className="flex items-center gap-1.5">
                       <span>Customer</span>
                       {sortField === "customer_name" ? (
-                        sortOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-primary" /> : <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        sortOrder === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-primary" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        )
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-40" />
                       )}
@@ -374,7 +391,11 @@ function InvoicesPage() {
                     <div className="flex items-center gap-1.5">
                       <span>Brand</span>
                       {sortField === "brand_name" ? (
-                        sortOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-primary" /> : <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        sortOrder === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-primary" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        )
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-40" />
                       )}
@@ -387,7 +408,11 @@ function InvoicesPage() {
                     <div className="flex items-center justify-end gap-1.5">
                       <span>Total Amount</span>
                       {sortField === "total" ? (
-                        sortOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-primary" /> : <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        sortOrder === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-primary" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                        )
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-40" />
                       )}
@@ -398,10 +423,7 @@ function InvoicesPage() {
               </thead>
               <tbody className="divide-y divide-border/60">
                 {paginatedRows.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="transition-colors hover:bg-secondary/40 group"
-                  >
+                  <tr key={r.id} className="transition-colors hover:bg-secondary/40 group">
                     <td className="px-4 py-3 font-semibold text-foreground">
                       <Link
                         to="/invoices/$id"

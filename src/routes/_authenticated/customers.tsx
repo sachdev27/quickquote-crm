@@ -304,7 +304,8 @@ function Customers() {
           </div>
 
           <p className="text-xs text-muted-foreground tabular-nums">
-            Showing <b className="text-foreground">{sorted.length}</b> customer{sorted.length === 1 ? "" : "s"}
+            Showing <b className="text-foreground">{sorted.length}</b> customer
+            {sorted.length === 1 ? "" : "s"}
           </p>
         </div>
 
@@ -380,7 +381,11 @@ function Customers() {
                       <div className="flex items-center gap-1">
                         <span>Name</span>
                         {sortCol === "name" ? (
-                          sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                          sortAsc ? (
+                            <ArrowUp className="h-3 w-3 text-primary" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3 text-primary" />
+                          )
                         ) : (
                           <ArrowUpDown className="h-3 w-3 opacity-40" />
                         )}
@@ -393,7 +398,11 @@ function Customers() {
                       <div className="flex items-center gap-1">
                         <span>Phone</span>
                         {sortCol === "phone" ? (
-                          sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                          sortAsc ? (
+                            <ArrowUp className="h-3 w-3 text-primary" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3 text-primary" />
+                          )
                         ) : (
                           <ArrowUpDown className="h-3 w-3 opacity-40" />
                         )}
@@ -406,7 +415,11 @@ function Customers() {
                       <div className="flex items-center gap-1">
                         <span>GSTIN</span>
                         {sortCol === "gstin" ? (
-                          sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                          sortAsc ? (
+                            <ArrowUp className="h-3 w-3 text-primary" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3 text-primary" />
+                          )
                         ) : (
                           <ArrowUpDown className="h-3 w-3 opacity-40" />
                         )}
@@ -419,7 +432,11 @@ function Customers() {
                       <div className="flex items-center justify-end gap-1">
                         <span>Quotes</span>
                         {sortCol === "quotes" ? (
-                          sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                          sortAsc ? (
+                            <ArrowUp className="h-3 w-3 text-primary" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3 text-primary" />
+                          )
                         ) : (
                           <ArrowUpDown className="h-3 w-3 opacity-40" />
                         )}
@@ -432,7 +449,11 @@ function Customers() {
                       <div className="flex items-center justify-end gap-1">
                         <span>Won</span>
                         {sortCol === "won" ? (
-                          sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                          sortAsc ? (
+                            <ArrowUp className="h-3 w-3 text-primary" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3 text-primary" />
+                          )
                         ) : (
                           <ArrowUpDown className="h-3 w-3 opacity-40" />
                         )}
@@ -445,7 +466,11 @@ function Customers() {
                       <div className="flex items-center gap-1">
                         <span>Last quote</span>
                         {sortCol === "last_quote" ? (
-                          sortAsc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />
+                          sortAsc ? (
+                            <ArrowUp className="h-3 w-3 text-primary" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3 text-primary" />
+                          )
                         ) : (
                           <ArrowUpDown className="h-3 w-3 opacity-40" />
                         )}
@@ -462,7 +487,9 @@ function Customers() {
                         key={c.id}
                         onClick={() => setSel(c.id)}
                         className={`cursor-pointer transition-colors ${
-                          isSelected ? "bg-primary/10 font-semibold text-foreground" : "hover:bg-secondary/50 text-foreground/90"
+                          isSelected
+                            ? "bg-primary/10 font-semibold text-foreground"
+                            : "hover:bg-secondary/50 text-foreground/90"
                         }`}
                       >
                         <td className="px-3 py-2.5 font-semibold">
@@ -483,9 +510,7 @@ function Customers() {
                         <td className="px-2 text-right font-semibold text-emerald-700 dark:text-emerald-500">
                           {fmtMoney(st.won)}
                         </td>
-                        <td className="px-3 text-muted-foreground">
-                          {st.lastDate ?? "—"}
-                        </td>
+                        <td className="px-3 text-muted-foreground">{st.lastDate ?? "—"}</td>
                       </tr>
                     );
                   })}
@@ -503,86 +528,83 @@ function Customers() {
                 itemName="customers"
               />
             </div>
-                <div className="sticky top-20 space-y-3 rounded-2xl border border-border bg-card p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xl font-bold">{current.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {[current.phone, current.gstin].filter(Boolean).join(" · ") || "No phone"}
-                      </p>
-                      {current.address && (
-                        <p className="text-sm text-muted-foreground">{current.address}</p>
-                      )}
-                    </div>
-                    <Button
-                      variant="outline"
-                      className="h-9 rounded-lg"
-                      onClick={() => setF(toForm(current))}
-                    >
-                      Edit
-                    </Button>
-                  </div>
-                  <ContactsList customerId={current.id} />
-                  {current.notes && (
-                    <p className="whitespace-pre-line rounded-xl bg-secondary p-3 text-sm">
-                      {current.notes}
-                    </p>
+            <div className="sticky top-20 space-y-3 rounded-2xl border border-border bg-card p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xl font-bold">{current.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {[current.phone, current.gstin].filter(Boolean).join(" · ") || "No phone"}
+                  </p>
+                  {current.address && (
+                    <p className="text-sm text-muted-foreground">{current.address}</p>
                   )}
-                  {current.phone && (
-                    <div className="flex gap-2">
-                      <Button asChild variant="outline" className="h-10 flex-1 rounded-lg">
-                        <a href={`tel:${current.phone}`}>
-                          <Phone className="mr-1 h-4 w-4" /> Call
-                        </a>
-                      </Button>
-                      <Button asChild variant="outline" className="h-10 flex-1 rounded-lg">
-                        <a href={wa(current.phone)} target="_blank" rel="noreferrer">
-                          <MessageCircle className="mr-1 h-4 w-4" /> WhatsApp
-                        </a>
-                      </Button>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-2 tabular-nums">
-                    <div className="rounded-xl bg-secondary p-3">
-                      <p className="text-xs text-muted-foreground">Quotes</p>
-                      <p className="text-lg font-bold">{qs.length}</p>
-                    </div>
-                    <div className="rounded-xl bg-secondary p-3">
-                      <p className="text-xs text-muted-foreground">Won</p>
-                      <p className="text-lg font-bold text-emerald-700">{fmtMoney(won)}</p>
-                    </div>
-                  </div>
-                  <ul className="divide-y divide-border/60">
-                    {qs.length === 0 && (
-                      <li className="py-2 text-sm text-muted-foreground">No quotes yet.</li>
-                    )}
-                    {qs.map((x) => (
-                      <li key={x.id}>
-                        <Link
-                          to="/quotes/$id"
-                          params={{ id: x.id }}
-                          className="flex items-center justify-between gap-2 py-2 text-sm hover:text-primary"
-                        >
-                          <span>
-                            <span className="font-semibold">{x.quote_no}</span>{" "}
-                            <span className="text-muted-foreground">
-                              · {x.quote_date} · {x.brand_name}
-                            </span>
-                          </span>
-                          <span className="flex items-center gap-2 tabular-nums">
-                            <b>{fmtMoney(x.total)}</b>
-                            <StatusPill
-                              status={x.status}
-                              label={STATUS_LABELS[x.status] ?? x.status}
-                            />
-                          </span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
+                </div>
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg"
+                  onClick={() => setF(toForm(current))}
+                >
+                  Edit
+                </Button>
+              </div>
+              <ContactsList customerId={current.id} />
+              {current.notes && (
+                <p className="whitespace-pre-line rounded-xl bg-secondary p-3 text-sm">
+                  {current.notes}
+                </p>
+              )}
+              {current.phone && (
+                <div className="flex gap-2">
+                  <Button asChild variant="outline" className="h-10 flex-1 rounded-lg">
+                    <a href={`tel:${current.phone}`}>
+                      <Phone className="mr-1 h-4 w-4" /> Call
+                    </a>
+                  </Button>
+                  <Button asChild variant="outline" className="h-10 flex-1 rounded-lg">
+                    <a href={wa(current.phone)} target="_blank" rel="noreferrer">
+                      <MessageCircle className="mr-1 h-4 w-4" /> WhatsApp
+                    </a>
+                  </Button>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 tabular-nums">
+                <div className="rounded-xl bg-secondary p-3">
+                  <p className="text-xs text-muted-foreground">Quotes</p>
+                  <p className="text-lg font-bold">{qs.length}</p>
+                </div>
+                <div className="rounded-xl bg-secondary p-3">
+                  <p className="text-xs text-muted-foreground">Won</p>
+                  <p className="text-lg font-bold text-emerald-700">{fmtMoney(won)}</p>
                 </div>
               </div>
-            )}
+              <ul className="divide-y divide-border/60">
+                {qs.length === 0 && (
+                  <li className="py-2 text-sm text-muted-foreground">No quotes yet.</li>
+                )}
+                {qs.map((x) => (
+                  <li key={x.id}>
+                    <Link
+                      to="/quotes/$id"
+                      params={{ id: x.id }}
+                      className="flex items-center justify-between gap-2 py-2 text-sm hover:text-primary"
+                    >
+                      <span>
+                        <span className="font-semibold">{x.quote_no}</span>{" "}
+                        <span className="text-muted-foreground">
+                          · {x.quote_date} · {x.brand_name}
+                        </span>
+                      </span>
+                      <span className="flex items-center gap-2 tabular-nums">
+                        <b>{fmtMoney(x.total)}</b>
+                        <StatusPill status={x.status} label={STATUS_LABELS[x.status] ?? x.status} />
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
       </div>
 
       <Drawer open={!!f} onOpenChange={(o) => !o && setF(null)}>

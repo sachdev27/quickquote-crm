@@ -7,14 +7,12 @@ import { useMe } from "@/hooks/use-me";
 import { recall } from "@/lib/utils";
 import { LAST_BRAND, LAST_PRESET } from "@/lib/catalog";
 
-export const Route = createFileRoute("/_authenticated/price-extractor")(
-  {
-    head: () => ({
-      meta: [{ title: "Price Extractor — Tarko CRM" }],
-    }),
-    component: PriceExtractorPage,
-  },
-);
+export const Route = createFileRoute("/_authenticated/price-extractor")({
+  head: () => ({
+    meta: [{ title: "Price Extractor — Tarko CRM" }],
+  }),
+  component: PriceExtractorPage,
+});
 
 function PriceExtractorPage() {
   const me = useMe();
@@ -44,28 +42,23 @@ function PriceExtractorPage() {
     );
   }
 
-  const loading =
-    pricing.isLoading || prods.isLoading || brands.isLoading;
+  const loading = pricing.isLoading || prods.isLoading || brands.isLoading;
   const ready = pricing.data && prods.data && brands.data;
 
   return (
     <PageShell title="Price Extractor" wide>
-      {loading && (
-        <div className="h-96 animate-pulse rounded-2xl bg-secondary" />
-      )}
+      {loading && <div className="h-96 animate-pulse rounded-2xl bg-secondary" />}
       {ready && (
         <PricePlayground
           products={prods.data}
           pricing={pricing.data}
           brands={brands.data}
           initialBrandId={
-            brands.data.find((b) => b.id === recall(LAST_BRAND))
-              ?.id ?? brands.data[0]?.id
+            brands.data.find((b) => b.id === recall(LAST_BRAND))?.id ?? brands.data[0]?.id
           }
           initialPresetId={
-            pricing.data.presets.find(
-              (p) => p.id === recall(LAST_PRESET),
-            )?.id ?? pricing.data.presets[0]?.id
+            pricing.data.presets.find((p) => p.id === recall(LAST_PRESET))?.id ??
+            pricing.data.presets[0]?.id
           }
           initialProfileId={pricing.data.activeProfileId}
         />
