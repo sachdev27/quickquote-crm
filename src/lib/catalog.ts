@@ -64,7 +64,7 @@ export const normalizePn = (s: string) => {
   return v ? `PN ${v}` : "";
 };
 
-// Printed description of a catalog product: Brand (sprinklers) · name · PN rating, each only if
+// Printed description of a catalog product: Brand (pipes, sprinklers) · name · PN rating, each only if
 // present and not already written in the name.
 export const quoteTitle = (
   p: { category: string; name: string; pn: string | null },
@@ -73,7 +73,7 @@ export const quoteTitle = (
   const has = (t: string) => p.name.toLowerCase().includes(t.toLowerCase());
   const pn = p.pn ? normalizePn(p.pn) : "";
   return [
-    p.category === "sprinkler" && brand && !has(brand) ? brand : "",
+    (p.category === "pipe" || p.category === "sprinkler") && brand && !has(brand) ? brand : "",
     p.category === "sprinkler" && !has("sprinkler") ? "Sprinkler Pipe" : "",
     p.name,
     pn && !has(pn) ? pn : "",

@@ -237,11 +237,15 @@ function NewQuote() {
     const sdr = p?.category === "pipe" && p.size_mm ? sdrFor(p.grade ?? "", pnNumber(p.pn)) : null;
     return p?.size_mm && sdr ? pipeKgPerM(p.size_mm, sdr) : l.weightKg;
   };
-  const priced: Draft[] = lines.map((l) => {
-    const weightKg = lineWeightKg(l);
-    const rateKg = l.rateEdited || !l.rateGroupId ? l.rateKg : rateOf(l.rateGroupId, weightKg);
-    return { ...l, weightKg, rateKg, unitPrice: weightKg > 0 ? weightKg * rateKg : l.unitPrice };
-  });
+  // pipes first, then sprinkler, then fittings (stable within each)
+  const rank = (c: string) => ["pipe", "sprinkler", "fitting"].indexOf(c);
+  const priced: Draft[] = [...lines]
+    .sort((a, b) => rank(a.category) - rank(b.category))
+    .map((l) => {
+      const weightKg = lineWeightKg(l);
+      const rateKg = l.rateEdited || !l.rateGroupId ? l.rateKg : rateOf(l.rateGroupId, weightKg);
+      return { ...l, weightKg, rateKg, unitPrice: weightKg > 0 ? weightKg * rateKg : l.unitPrice };
+    });
   const totals = computeTotals(priced, num(extra), { inclusive: false, igst });
   // Roll length (m) of a pipe line: what the user set, else read from the description, else the product's.
   const rollLenOf = (l: Draft): number => {
