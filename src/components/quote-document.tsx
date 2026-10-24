@@ -3,6 +3,7 @@ import { UNIT_LABELS, computeTotals, fmtNum, inWords, lineWeight, type Line } fr
 import { pipeSpec, type PipeSpec } from "@/lib/pipe-spec";
 import { fmtAmt, fmtDate, fullAddress, stateOf, validUntil } from "@/lib/quote-doc";
 import { PipeSection } from "@/components/pipe-section";
+import { FittingDrawing } from "@/components/fitting-drawing";
 import type { getQuote } from "@/data/api";
 
 type Loaded = Awaited<ReturnType<typeof getQuote>>;
@@ -231,7 +232,13 @@ export function QuoteDocument({
                         <Td className="text-center text-[var(--qd-muted)]">{i + 1}</Td>
                         <Td>
                           <div className="flex items-center gap-[2.5mm]">
-                            {specs[i] && <PipeSection spec={specs[i]!} />}
+                            {specs[i] ? (
+                              <PipeSection spec={specs[i]!} />
+                            ) : (
+                              l.category === "fitting" && (
+                                <FittingDrawing description={l.description} />
+                              )
+                            )}
                             <div className="min-w-0">
                               <p className="font-medium text-[var(--qd-ink)]">{l.description}</p>
                               <SpecLine spec={specs[i]} />
