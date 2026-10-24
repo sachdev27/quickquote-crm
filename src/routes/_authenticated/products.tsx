@@ -406,6 +406,16 @@ function ProductsAdmin() {
   const presetName = (id: string) => pricing.data?.presets.find((p) => p.id === id)?.name ?? "";
 
   // Product editor: bottom sheet on phones, the right-hand pane on desktop.
+  // Duplicate: the same details as a new, unsaved product; the name is selected for retyping.
+  const duplicate = (p: ProductForm) => {
+    const { id: _id, ...rest } = p;
+    setProd({ ...rest, name: `${p.name ?? ""} (copy)` });
+    setTimeout(() => {
+      const el = document.getElementById("product-name") as HTMLInputElement | null;
+      el?.focus();
+      el?.select();
+    }, 350);
+  };
   const removeProduct = () =>
     confirm("Remove this product from the catalog?") && submitProduct(null, false);
   // the product side pane (desktop, Products tab) vs. a dialog/sheet opened from elsewhere
@@ -431,6 +441,7 @@ function ProductsAdmin() {
         />
         <Field label="Name (as printed on quote)">
           <input
+            id="product-name"
             value={prod.name ?? ""}
             onChange={(e) => setProd({ ...prod, name: e.target.value })}
             placeholder="e.g. 110 mm Elbow 90°"
@@ -641,16 +652,28 @@ function ProductsAdmin() {
           </Button>
         ) : (
           prod.id && (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-12 rounded-xl"
-              aria-label="Remove product"
-              title="Remove product"
-              onClick={removeProduct}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 rounded-xl"
+                aria-label="Duplicate product"
+                title="Duplicate product"
+                onClick={() => duplicate(prod)}
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 rounded-xl"
+                aria-label="Remove product"
+                title="Remove product"
+                onClick={removeProduct}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </>
           )
         )}
         <Button type="submit" className="h-12 flex-1 rounded-xl text-base font-semibold">
@@ -759,15 +782,26 @@ function ProductsAdmin() {
                   <div className="flex items-center justify-between px-4 pt-4">
                     <p className="font-semibold">{prod.id ? "Edit product" : "New product"}</p>
                     {prod.id && (
-                      <button
-                        type="button"
-                        aria-label="Remove product"
-                        title="Remove product"
-                        className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-destructive"
-                        onClick={removeProduct}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <span className="flex">
+                        <button
+                          type="button"
+                          aria-label="Duplicate product"
+                          title="Duplicate product"
+                          className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                          onClick={() => duplicate(prod)}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Remove product"
+                          title="Remove product"
+                          className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-destructive"
+                          onClick={removeProduct}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </span>
                     )}
                   </div>
                   {prod.id && <PresetPreview product={prod} pricing={scoped} />}
@@ -786,6 +820,7 @@ function ProductsAdmin() {
             rateOf={rateOf}
             onSaveWeight={saveWeight}
             onEdit={(p) => setProd({ ...p, weight: String(p.weight_kg) })}
+            onDuplicate={(p) => duplicate({ ...p, weight: String(p.weight_kg) })}
             onAdd={() =>
               setProd({
                 category: "fitting",
@@ -2763,6 +2798,7 @@ function ProductList({
   onPreset,
   rateOf,
   onSaveWeight,
+  onDuplicate,
   onEdit,
   onAdd,
   pane,
@@ -2777,6 +2813,7 @@ function ProductList({
   onPreset: (id: string) => void;
   rateOf: (group: string, weightKg?: number, brandId?: string | null) => number;
   onSaveWeight: (p: Product, v: string) => Promise<void>;
+  onDuplicate: (p: Product) => void;
   onEdit: (p: Product) => void;
   onAdd: () => void;
 }) {
@@ -3229,12 +3266,28 @@ function ProductList({
                           <tr
                             key={p.id}
                             onClick={() => onEdit(p)}
-                            className={`cursor-pointer border-b border-border/50 ${p.id === selectedId ? "bg-primary/10" : "hover:bg-secondary/40"}`}
+                            className={`group cursor-pointer border-b border-border/50 ${p.id === selectedId ? "bg-primary/10" : "hover:bg-secondary/40"}`}
                           >
                             <td className="py-1.5 pr-1" onClick={(e) => e.stopPropagation()}>
                               {tick([p.id], `Select ${shortName(p)}`)}
                             </td>
-                            <td className="py-1.5 pr-3 text-sm font-medium">{shortName(p)}</td>
+                            <td className="py-1.5 pr-3 text-sm font-medium">
+                              <span className="flex items-center gap-1">
+                                {shortName(p)}
+                                <button
+                                  type="button"
+                                  aria-label={`Duplicate ${shortName(p)}`}
+                                  title="Duplicate"
+                                  className="rounded p-1 text-muted-foreground opacity-0 hover:bg-secondary hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDuplicate(p);
+                                  }}
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            </td>
                             <td className="px-2 text-sm">{p.grade ?? "—"}</td>
                             <td className="px-2 text-sm">{pnLabel(p)}</td>
                             <td className="whitespace-nowrap px-2 text-sm text-muted-foreground">

@@ -49,13 +49,13 @@ function QuoteView() {
 
   if (error)
     return (
-      <PageShell title="Quote">
+      <PageShell title="Quote" back="/dashboard">
         <p className="text-destructive">{(error as Error).message}</p>
       </PageShell>
     );
   if (!data)
     return (
-      <PageShell title="Quote">
+      <PageShell title="Quote" back="/dashboard">
         <div className="h-96 animate-pulse rounded-2xl bg-secondary" />
       </PageShell>
     );
@@ -111,7 +111,7 @@ function QuoteView() {
   });
 
   return (
-    <PageShell title={q.quote_no} wide>
+    <PageShell title={q.quote_no} wide back="/dashboard">
       {/* Desktop: actions, activity and history on the left, the document preview on the right. */}
       <div className="mx-auto grid max-w-md gap-4 md:max-w-5xl lg:max-w-none lg:grid-cols-[23rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-3 lg:gap-y-2">
         <div className="no-print space-y-3 lg:col-start-1 lg:row-start-1 lg:space-y-2">

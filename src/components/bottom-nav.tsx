@@ -1,5 +1,6 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
+  ArrowLeft,
   BarChart3,
   CalendarCheck,
   FileText,
@@ -74,14 +75,17 @@ export function PageShell({
   actions,
   bar,
   wide,
+  back,
   children,
 }: {
   title: string;
+  back?: string; // shows a back arrow: previous page, or this path when opened directly
   actions?: React.ReactNode; // right side of the title bar (all sizes)
   bar?: React.ReactNode; // sticky action bar above the mobile tab bar
   wide?: boolean; // use the full desktop width (tables, multi-pane)
   children: React.ReactNode;
 }) {
+  const navigate = useNavigate();
   const active = useActive();
   const { isAdmin } = useMe();
   const links = LINKS.filter((l) => isAdmin || l.to !== "/products");
@@ -130,7 +134,22 @@ export function PageShell({
               wide && "lg:max-w-none lg:px-5",
             )}
           >
-            <h1 className="text-lg font-bold text-foreground lg:text-base">{title}</h1>
+            <div className="flex min-w-0 items-center gap-1">
+              {back && (
+                <button
+                  type="button"
+                  aria-label="Back"
+                  title="Back"
+                  onClick={() =>
+                    window.history.length > 1 ? window.history.back() : navigate({ to: back })
+                  }
+                  className="-ml-2 rounded-full p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                >
+                  <ArrowLeft className="h-5 w-5 lg:h-4 lg:w-4" />
+                </button>
+              )}
+              <h1 className="truncate text-lg font-bold text-foreground lg:text-base">{title}</h1>
+            </div>
             <button
               type="button"
               aria-label="Search"

@@ -23,13 +23,13 @@ function InvoicePage() {
 
   if (error)
     return (
-      <PageShell title="Tax invoice">
+      <PageShell title="Tax invoice" back="/invoices">
         <p className="text-destructive">{(error as Error).message}</p>
       </PageShell>
     );
   if (!data)
     return (
-      <PageShell title="Tax invoice">
+      <PageShell title="Tax invoice" back="/invoices">
         <div className="h-96 animate-pulse rounded-2xl bg-secondary" />
       </PageShell>
     );
@@ -61,7 +61,7 @@ function InvoicePage() {
   };
 
   return (
-    <PageShell title={inv.invoice_no} wide>
+    <PageShell title={inv.invoice_no} wide back="/invoices">
       <div className="mx-auto grid max-w-md gap-4 md:max-w-5xl lg:max-w-none lg:grid-cols-[23rem_minmax(0,1fr)] lg:items-start lg:gap-3">
         <div className="no-print space-y-3 lg:space-y-2">
           <div className="flex gap-2 lg:gap-1.5">

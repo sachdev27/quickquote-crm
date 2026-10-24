@@ -112,7 +112,7 @@ function PriceList() {
   );
 
   return (
-    <PageShell title="Price list" wide>
+    <PageShell title="Price list" wide back="/products">
       <div className="no-print mx-auto mb-4 max-w-4xl space-y-3">
         {brands.data && brands.data.length > 1 && (
           <Field label="Brand">

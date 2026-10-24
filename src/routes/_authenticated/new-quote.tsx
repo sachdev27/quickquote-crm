@@ -739,6 +739,7 @@ function NewQuote() {
 
   return (
     <PageShell
+      back="/dashboard"
       title={editId ? `Edit ${editing.data?.quote.quote_no ?? "quote"}` : "New quote"}
       wide
       bar={
