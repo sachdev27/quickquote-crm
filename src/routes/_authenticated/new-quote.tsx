@@ -545,7 +545,7 @@ function NewQuote() {
       (t) => !nums.includes(t) && t !== grade && !/^(cut|roll|r|c|complete)$/.test(t),
     );
     const out = (prods.data ?? []).filter((p) => {
-      if (p.category === "sprinkler" && p.brand_id && p.brand_id !== (brand?.id ?? brandId))
+      if (p.category === "sprinkler" && brand && p.brand_id && p.brand_id !== brand.id)
         return false;
       if (p.category === "pipe") {
         if (nums[0] && !String(p.size_mm ?? "").startsWith(nums[0])) return false;
@@ -573,7 +573,7 @@ function NewQuote() {
       const n = qtyTok ? Number(qtyTok.slice(1)) : p.category === "pipe" ? 1 : Number(nums[0]) || 1;
       return p.unit === "m" ? n * (len ?? 100) : n;
     };
-    return out.slice(0, 8).map((p) => ({ p, brand, qty: qty(p) }));
+    return out.slice(0, 40).map((p) => ({ p, brand, qty: qty(p) }));
   }, [quick, prods.data, brands.data, brandId]);
 
   function quickAdd(i = qi) {
@@ -863,7 +863,7 @@ function NewQuote() {
                     <ul
                       id="quick-suggestions"
                       role="listbox"
-                      className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
+                      className="absolute inset-x-0 top-full z-30 mt-1 max-h-96 overflow-y-auto rounded-xl border border-border bg-popover shadow-lg"
                     >
                       {suggestions.map((s, i) => (
                         <li key={s.p.id} role="option" aria-selected={i === qi}>
