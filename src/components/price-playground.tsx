@@ -34,6 +34,7 @@ import {
   SPRINKLER_GROUP,
 } from "@/lib/quote";
 import { isSpec } from "@/lib/is4984";
+import { productQueryFilter } from "@/lib/product-search";
 import { pnNumber, sdrFor } from "@/lib/weights";
 import type { listPricing, listProducts } from "@/data/api";
 
@@ -135,24 +136,14 @@ export function PricePlayground({
 
   // Filter products
   const filteredProducts = useMemo(() => {
+    const matchesQuery = productQueryFilter(search);
     return products.filter((p) => {
       if (category !== "all" && p.category !== category) return false;
       if (grade !== "all" && p.grade !== grade) return false;
       if (selectedOd !== "all" && p.size_mm !== selectedOd) return false;
       if (selectedPn !== "all" && p.pn !== selectedPn) return false;
 
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        const matchesName = p.name.toLowerCase().includes(q);
-        const matchesHsn = p.hsn?.toLowerCase().includes(q);
-        const matchesGrade = p.grade?.toLowerCase().includes(q);
-        const matchesPn = p.pn?.toLowerCase().includes(q);
-        const matchesOd = p.size_mm ? `${p.size_mm}mm`.includes(q) || `${p.size_mm}` === q : false;
-        if (!matchesName && !matchesHsn && !matchesGrade && !matchesPn && !matchesOd) {
-          return false;
-        }
-      }
-      return true;
+      return matchesQuery(p);
     });
   }, [products, category, grade, selectedOd, selectedPn, search]);
 
@@ -393,7 +384,7 @@ export function PricePlayground({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Instant search: e.g. 63 pn6, PE100 110, coupler 50..."
+              placeholder="Instant search: OD PN grade, e.g. 63 6 pe63 · 110 10 cut · coupler 50..."
               className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-9 text-sm font-medium focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-hidden"
             />
             {search && (
