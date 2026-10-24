@@ -2548,6 +2548,7 @@ function SprinklerCard({
     brand: string;
     size: string;
     len: string;
+    pn: string;
     weight: string;
   }>(null);
   const [busy, setBusy] = useState(false);
@@ -2578,6 +2579,7 @@ function SprinklerCard({
           size_mm: Math.round(size),
           length_m: len,
           brand_id: form.brand || null,
+          pn: normalizePn(form.pn) || null,
           unit: "pc",
           weight_kg: weight,
           gst_rate: old?.gst_rate ?? 5,
@@ -2612,7 +2614,7 @@ function SprinklerCard({
             <span className="min-w-0 truncate">
               <span className="font-medium">{brandName(p.brand_id)}</span>{" "}
               <span className="text-muted-foreground">
-                {p.size_mm} mm · {p.length_m ?? "?"} m
+                {p.size_mm} mm · {p.length_m ?? "?"} m{p.pn ? ` · ${p.pn}` : ""}
               </span>
             </span>
             <span className="flex items-center gap-1">
@@ -2626,6 +2628,7 @@ function SprinklerCard({
                     brand: p.brand_id ?? "",
                     size: String(p.size_mm ?? ""),
                     len: String(p.length_m ?? ""),
+                    pn: p.pn ?? "",
                     weight: String(p.weight_kg),
                   })
                 }
@@ -2661,7 +2664,7 @@ function SprinklerCard({
               ]}
             />
           </Field>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Field label="Size (mm)">
               <input
                 inputMode="numeric"
@@ -2682,6 +2685,14 @@ function SprinklerCard({
                 <option value="6" />
                 <option value="12" />
               </datalist>
+            </Field>
+            <Field label="Pressure (PN)">
+              <input
+                value={form.pn}
+                placeholder="PN 6"
+                onChange={(e) => setForm({ ...form, pn: e.target.value })}
+                className={inputCls}
+              />
             </Field>
             <Field label="Weight (kg)">
               <input
@@ -2705,7 +2716,9 @@ function SprinklerCard({
         <Button
           variant="outline"
           className="h-11 rounded-xl"
-          onClick={() => setForm({ brand: brands[0]?.id ?? "", size: "", len: "6", weight: "" })}
+          onClick={() =>
+            setForm({ brand: brands[0]?.id ?? "", size: "", len: "6", pn: "", weight: "" })
+          }
         >
           <Plus className="mr-1 h-4 w-4" /> Sprinkler size
         </Button>

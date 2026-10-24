@@ -21,7 +21,14 @@ import {
   listEnquiries,
   saveProduct,
 } from "@/data/api";
-import { LAST_BRAND, LAST_PRESET, newPipe, normalizePn, shortName } from "@/lib/catalog";
+import {
+  LAST_BRAND,
+  LAST_PRESET,
+  newPipe,
+  normalizePn,
+  quoteTitle,
+  shortName,
+} from "@/lib/catalog";
 import {
   CATEGORY_LABELS,
   buildWhatsAppUrl,
@@ -402,7 +409,7 @@ function NewQuote() {
         productId: p.id,
         rateGroupId: p.rate_group_id,
         category: p.category as Category,
-        description: p.name,
+        description: quoteTitle(p, brandName(p.brand_id || brandId)),
         hsn: p.hsn,
         unit: p.unit as Unit,
         qty: step,
@@ -551,7 +558,7 @@ function NewQuote() {
         productId: p.id,
         rateGroupId: p.rate_group_id,
         category: p.category as Category,
-        description: p.name,
+        description: quoteTitle(p, brandName(p.brand_id || brandId)),
         hsn: p.hsn,
         unit: p.unit as Unit,
         qty,
@@ -1815,8 +1822,8 @@ function AddItemSheet({
       return void toast.error("This product has no weight. Set it under Products.");
     const desc =
       cat === "pipe" && !customLen
-        ? `${sel.name} · ${rolls} roll${rolls > 1 ? "s" : ""} × ${len} m`
-        : sel.name;
+        ? `${quoteTitle(sel, brandName(sel.brand_id || quoteBrandId))} · ${rolls} roll${rolls > 1 ? "s" : ""} × ${len} m`
+        : quoteTitle(sel, brandName(sel.brand_id || quoteBrandId));
     onUseBrand(sel);
     onAdd({
       productId: sel.id,
