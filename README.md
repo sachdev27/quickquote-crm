@@ -11,6 +11,8 @@ Runs on Cloudflare Workers + D1, login via Cloudflare Access.
 
 (`dev.sh` picks Node 22+, installs packages if needed, then runs `npm run local`.)
 
+Deploy: merging to `main` deploys via CI; `./deploy.sh` does it by hand (checks, asks, then `npm run deploy`).
+
 Applies migrations to a local D1 (`.wrangler/state`) and starts the dev server at the URL Vite prints (usually http://localhost:8080).
 
 ## Deploy
