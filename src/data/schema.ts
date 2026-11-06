@@ -219,6 +219,19 @@ export const quote_audit = sqliteTable("quote_audit", {
   what: text("what").notNull(),
 });
 
+// Who deleted which quotation / tax invoice, kept after the record is gone.
+export const deletion_log = sqliteTable("deletion_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  at: text("at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  by: text("by"),
+  kind: text("kind").notNull(), // quote | invoice
+  ref_no: text("ref_no").notNull(),
+  party: text("party"),
+  detail: text("detail"),
+});
+
 // Tax invoice issued from a quote: a snapshot of the buyer and lines at the time of issue.
 export const invoices = sqliteTable("invoices", {
   id: id(),
