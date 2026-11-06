@@ -20,6 +20,7 @@ import {
   listUsers,
   saveUser,
   deleteUser,
+  listDeletions,
 } from "@/data/api";
 import { useMe } from "@/hooks/use-me";
 import { prepareLogo } from "@/lib/logo";
@@ -317,6 +318,7 @@ function SettingsAdmin() {
           <TermsLibrary />
 
           <Shortcuts isAdmin />
+          <DeletionLog />
           <UsersSection me={me.email} />
           <AccountCard email={me.email} role={me.role ?? "admin"} />
         </div>
@@ -563,6 +565,42 @@ function Shortcuts({ isAdmin }: { isAdmin: boolean }) {
         </Link>
       ))}
     </section>
+  );
+}
+
+// Who deleted which quotation or tax invoice, and when. Kept after the record itself is gone.
+function DeletionLog() {
+  const { data } = useQuery({ queryKey: ["deletions"], queryFn: () => listDeletions() });
+  return (
+    <Card title="Deletion log">
+      {!data?.length ? (
+        <p className="text-sm text-muted-foreground">Nothing has been deleted.</p>
+      ) : (
+        <ul className="max-h-72 space-y-2 overflow-y-auto pr-1">
+          {data.map((d) => (
+            <li key={d.id} className="border-l-2 border-destructive/40 pl-3 text-sm">
+              <p className="text-xs text-muted-foreground">
+                {new Date(d.at).toLocaleString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+                {d.by ? ` · ${d.by}` : ""}
+              </p>
+              <p className="leading-snug">
+                <b>
+                  {d.kind === "invoice" ? "Tax invoice" : "Quotation"} {d.ref_no}
+                </b>
+                {d.party ? ` · ${d.party}` : ""}
+              </p>
+              {d.detail && <p className="text-xs text-muted-foreground">{d.detail}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

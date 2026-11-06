@@ -29,6 +29,7 @@ import {
   invoice_items,
   settings,
   categories,
+  deletion_log,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -1434,24 +1435,82 @@ export const listFollowUps = createServerFn({ method: "GET" })
       .limit(200);
   });
 
+const deletedSummary = (ls: Parameters<typeof computeTotals>[0], extra: number, igst: boolean) =>
+  `${ls.length} item${ls.length === 1 ? "" : "s"} · ${fmtMoney(computeTotals(ls, extra, { inclusive: false, igst }).total)}`;
+
 export const deleteQuote = createServerFn({ method: "POST" })
   .middleware([authed])
   .validator(z.object({ id: z.string() }))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     const db = await getDb();
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, data.id));
+    if (!q) throw new Error("Quote not found");
     const [inv] = await db
       .select({ no: invoices.invoice_no })
       .from(invoices)
       .where(eq(invoices.quote_id, data.id));
     if (inv)
-      throw new Error(`Tax invoice ${inv.no} was issued from this quote; it can't be deleted.`);
+      throw new Error(
+        `Tax invoice ${inv.no} was issued from this quote. Delete the invoice first.`,
+      );
+    const [items, cust] = await Promise.all([
+      db.select().from(quote_items).where(eq(quote_items.quote_id, data.id)),
+      q.customer_id
+        ? db.select({ name: customers.name }).from(customers).where(eq(customers.id, q.customer_id))
+        : Promise.resolve([]),
+    ]);
     await db.batch([
+      db.insert(deletion_log).values({
+        by: context.user,
+        kind: "quote",
+        ref_no: q.quote_no,
+        party: cust[0]?.name ?? null,
+        detail: deletedSummary(items.map(toLine), q.extra_charges, !!q.igst),
+      }),
       db.delete(quote_items).where(eq(quote_items.quote_id, data.id)),
       db.delete(quote_audit).where(eq(quote_audit.quote_id, data.id)),
       db.delete(quotes).where(eq(quotes.id, data.id)),
     ]);
     return { ok: true };
   });
+
+// Admin only: tax invoices are legal documents. The quote stays (history notes the deletion).
+export const deleteInvoice = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const db = await getDb();
+    const [inv] = await db.select().from(invoices).where(eq(invoices.id, data.id));
+    if (!inv) throw new Error("Invoice not found");
+    const items = await db.select().from(invoice_items).where(eq(invoice_items.invoice_id, inv.id));
+    await db.batch([
+      db.insert(deletion_log).values({
+        by: context.user,
+        kind: "invoice",
+        ref_no: inv.invoice_no,
+        party: inv.buyer_name,
+        detail: deletedSummary(items.map(toInvoiceLine), inv.extra_charges, !!inv.igst),
+      }),
+      db.insert(quote_audit).values({
+        quote_id: inv.quote_id,
+        by: context.user,
+        what: `Tax invoice ${inv.invoice_no} deleted`,
+      }),
+      db.delete(invoice_items).where(eq(invoice_items.invoice_id, inv.id)),
+      db.delete(invoices).where(eq(invoices.id, inv.id)),
+    ]);
+    return { ok: true };
+  });
+
+export const listDeletions = createServerFn({ method: "GET" })
+  .middleware([adminOnly])
+  .handler(async () =>
+    (await getDb())
+      .select()
+      .from(deletion_log)
+      .orderBy(desc(deletion_log.at), desc(deletion_log.id))
+      .limit(200),
+  );
 
 // ---------- users & roles ----------
 export const whoami = createServerFn({ method: "GET" })

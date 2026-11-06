@@ -1,11 +1,12 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { FileText, Printer } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { FileText, Printer, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { PageShell } from "@/components/bottom-nav";
 import { Card } from "@/components/qq";
 import { Button } from "@/components/ui/button";
 import { QuoteDocument } from "@/components/quote-document";
-import { getInvoice } from "@/data/api";
+import { deleteInvoice, getInvoice } from "@/data/api";
 import { fmtDate } from "@/lib/quote-doc";
 import { computeTotals, fmtMoney } from "@/lib/quote";
 
@@ -16,6 +17,8 @@ export const Route = createFileRoute("/_authenticated/invoices/$id")({
 
 function InvoicePage() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data, error } = useQuery({
     queryKey: ["invoice", id],
     queryFn: () => getInvoice({ data: { id } }),
@@ -76,6 +79,29 @@ function InvoicePage() {
                 <FileText className="h-5 w-5 lg:h-4 lg:w-4" />
                 <span className="hidden lg:inline">Quotation</span>
               </Link>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-12 rounded-xl text-destructive hover:text-destructive"
+              title="Delete invoice"
+              onClick={async () => {
+                if (
+                  !confirm(
+                    `Delete tax invoice ${inv.invoice_no}? This is recorded in the deletion log.`,
+                  )
+                )
+                  return;
+                try {
+                  await deleteInvoice({ data: { id } });
+                  for (const k of [["invoices"], ["quote", inv.quote_id], ["audit", inv.quote_id]])
+                    void qc.invalidateQueries({ queryKey: k });
+                  navigate({ to: "/invoices" });
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Could not delete");
+                }
+              }}
+            >
+              <Trash2 className="h-5 w-5 lg:h-4 lg:w-4" />
             </Button>
           </div>
           <Card title="Invoice">

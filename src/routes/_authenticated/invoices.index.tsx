@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   ArrowDown,
   ArrowUp,
@@ -14,12 +15,13 @@ import {
   FileText,
   Filter,
   Search,
+  Trash2,
   X,
 } from "lucide-react";
 import { PageShell } from "@/components/bottom-nav";
 import { ProPagination } from "@/components/pro-pagination";
 import { Button } from "@/components/ui/button";
-import { listInvoices } from "@/data/api";
+import { deleteInvoice, listInvoices } from "@/data/api";
 import { fmtDate } from "@/lib/quote-doc";
 import { fmtMoney } from "@/lib/quote";
 import { cn } from "@/lib/utils";
@@ -34,6 +36,7 @@ type SortField = "invoice_no" | "invoice_date" | "customer_name" | "brand_name" 
 type SortOrder = "asc" | "desc";
 
 function InvoicesPage() {
+  const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [brandFilter, setBrandFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<"all" | "this-month" | "last-month" | "last-90">(
@@ -476,6 +479,30 @@ function InvoicesPage() {
                             <span className="hidden md:inline">Quote</span>
                           </Link>
                         )}
+                        <button
+                          type="button"
+                          title="Delete invoice"
+                          aria-label={`Delete ${r.invoice_no}`}
+                          className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          onClick={async () => {
+                            if (
+                              !confirm(
+                                `Delete tax invoice ${r.invoice_no}? This is recorded in the deletion log.`,
+                              )
+                            )
+                              return;
+                            try {
+                              await deleteInvoice({ data: { id: r.id } });
+                              void qc.invalidateQueries({ queryKey: ["invoices"] });
+                              void qc.invalidateQueries({ queryKey: ["deletions"] });
+                              toast.success("Invoice deleted");
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : "Could not delete");
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </td>
                   </tr>
