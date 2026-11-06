@@ -1,5 +1,6 @@
 import type { ExtractedItem } from "./inbound";
 import { productQueryFilter } from "@/lib/product-search";
+import { CATEGORY_LABELS } from "@/lib/quote";
 import { pnNumber } from "@/lib/weights";
 
 interface Matchable {
@@ -39,10 +40,53 @@ export function matchItem<P extends Matchable>(
   } else if (item.raw.trim()) {
     found = products.filter(productQueryFilter(item.raw));
   }
+  // Long free text rarely contains every word of a product name, so rank by how many words it shares.
+  if (!found.length && item.raw.trim()) found = rankByWords(item.raw, item.od_mm, products);
   const candidates = found.slice(0, 8);
   const status: MatchStatus =
     candidates.length === 0 ? "none" : candidates.length === 1 ? "matched" : "ambiguous";
   return { status, candidates };
+}
+
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9.]/g, "");
+const STOP = new Set([
+  "the",
+  "for",
+  "and",
+  "with",
+  "make",
+  "any",
+  "good",
+  "quality",
+  "mark",
+  "isi",
+  "mm",
+]);
+
+// Products sharing at least two words (name, grade, category) with the line, best first.
+// A size equal to the line's OD counts double, so "50MM PLB duct" finds the 50 mm PLB products.
+export function rankByWords<P extends Matchable>(
+  raw: string,
+  od: number | null,
+  products: P[],
+): P[] {
+  const words = [
+    ...new Set(
+      raw
+        .toLowerCase()
+        .split(/[^a-z0-9.]+/)
+        .filter((w) => (w.length >= 3 || /^\d+$/.test(w)) && !STOP.has(w)),
+    ),
+  ];
+  return products
+    .map((p) => {
+      const hay = squash(`${p.name} ${p.grade ?? ""} ${CATEGORY_LABELS[p.category] ?? p.category}`);
+      const hits = words.filter((w) => hay.includes(squash(w))).length;
+      return { p, score: hits + (od && p.size_mm === od ? 2 : 0) };
+    })
+    .filter((x) => x.score >= 2)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.p);
 }
 
 // Quantity in the product's own unit (pipes are priced per metre): "2 rolls" = 2 × the first roll length.

@@ -64,3 +64,18 @@ describe("extractionSchema", () => {
     ]);
   });
 });
+
+describe("matchItem word fallback", () => {
+  it("finds a PLB duct product from long free text", () => {
+    const plb = { ...pipe("p", 50, "", "PE63"), category: "plb", name: "PLB duct pipe 50 mm" };
+    const m = matchItem(
+      {
+        ...item({ od_mm: 50, pn: null }),
+        kind: "other",
+        raw: "HDPE PLB CABLE DUCT PIPE - 50MM FOR OUTDOOR",
+      },
+      [...products, plb],
+    );
+    expect(m.candidates[0]!.id).toBe("p");
+  });
+});

@@ -8,6 +8,8 @@ import { GmailInbox } from "@/components/gmail-inbox";
 import { Button } from "@/components/ui/button";
 import { listProducts } from "@/data/api";
 import { extractEnquiry } from "@/data/ai";
+import { matchesSearch } from "@/lib/catalog";
+import { productQueryFilter } from "@/lib/product-search";
 import { MAX_FILE_BYTES, type ExtractedItem, type Extraction } from "@/lib/ai/inbound";
 import { AI_DRAFT_KEY, matchItem, quoteQty, replyDraft, type AiDraft } from "@/lib/ai/match";
 import { ACCEPT_EXT, classify } from "@/lib/ai/files";
@@ -21,8 +23,7 @@ export const Route = createFileRoute("/_authenticated/ai-quote")({
 });
 
 type Product = Awaited<ReturnType<typeof listProducts>>[number];
-// productId "" = unmatched, CUSTOM = an item typed here. desc/price/gst override the catalog (blank = catalog).
-const CUSTOM = "__custom";
+// productId "" = no catalog product (a custom item if desc and price are filled). desc/price/gst override the catalog (blank = catalog).
 type Row = { item: ExtractedItem; productId: string; desc: string; price: string; gst: string };
 
 const toBase64 = (f: File) =>
@@ -119,7 +120,8 @@ function AiQuotePage() {
 
   const byId = new Map(products.map((p) => [p.id, p]));
   const priceOf = (r: Row) => (r.price.trim() === "" ? undefined : Number(r.price));
-  const isCustom = (r: Row) => r.productId === CUSTOM && !!r.desc.trim() && (priceOf(r) ?? 0) > 0;
+  // no catalog product, but a name and a price typed: it is a custom item
+  const isCustom = (r: Row) => !byId.has(r.productId) && !!r.desc.trim() && (priceOf(r) ?? 0) > 0;
   const usable = (r: Row) => byId.has(r.productId) || isCustom(r);
   const picked = (rows ?? []).filter(usable);
   const unmatched = (rows ?? []).filter((r) => !usable(r));
@@ -330,7 +332,7 @@ function AiQuotePage() {
                 {rows.map((r, i) => {
                   const m = matchItem(r.item, products);
                   const ok = usable(r);
-                  const custom = r.productId === CUSTOM;
+                  const custom = !byId.has(r.productId);
                   return (
                     <li key={i} className="space-y-2 py-3">
                       <div className="flex items-start justify-between gap-2">
@@ -343,40 +345,18 @@ function AiQuotePage() {
                         </button>
                       </div>
                       <div className="grid grid-cols-[1fr_5rem_5rem] gap-2">
-                        <select
-                          aria-label="Matched product"
-                          className={cn(input, !ok && "border-amber-500")}
+                        <ProductPicker
+                          products={products}
+                          candidates={m.candidates}
                           value={r.productId}
-                          onChange={(e) => patchRow(i, { productId: e.target.value })}
-                        >
-                          <option value="">
-                            {m.status === "none" ? "No match: pick a product" : "Pick a product…"}
-                          </option>
-                          <option value={CUSTOM}>Custom item (type name and price)</option>
-                          {m.candidates.length > 0 && (
-                            <optgroup label="Best matches">
-                              {m.candidates.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {label(p)}
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                          {Object.entries(CATEGORY_LABELS).map(([cat, name]) => (
-                            <optgroup key={cat} label={`All ${name}`}>
-                              {products
-                                .filter(
-                                  (p) =>
-                                    p.category === cat && !m.candidates.some((c) => c.id === p.id),
-                                )
-                                .map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {label(p)}
-                                  </option>
-                                ))}
-                            </optgroup>
-                          ))}
-                        </select>
+                          invalid={!ok}
+                          placeholder={
+                            m.status === "none"
+                              ? "Search products, or fill the fields below"
+                              : "Pick a product…"
+                          }
+                          onChange={(id) => patchRow(i, { productId: id })}
+                        />
                         <input
                           aria-label="Quantity"
                           inputMode="decimal"
@@ -493,3 +473,122 @@ function AiQuotePage() {
 }
 
 const blank = { name: null, company: null, phone: null, email: null, gstin: null };
+
+// Type-ahead over the whole catalog: best matches when the box is empty, otherwise every word must appear.
+function ProductPicker({
+  products,
+  candidates,
+  value,
+  invalid,
+  placeholder,
+  onChange,
+}: {
+  products: Product[];
+  candidates: Product[];
+  value: string;
+  invalid: boolean;
+  placeholder: string;
+  onChange: (id: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [cat, setCat] = useState(""); // "" = every category
+  const current = products.find((p) => p.id === value);
+  // Words match name/category ("plb 50"); numbers also work like the price extractor: "63 6 pe63" = OD, PN, grade.
+  const inCat = products.filter((p) => !cat || p.category === cat);
+  const shown = q.trim()
+    ? inCat
+        .filter(
+          (p) =>
+            matchesSearch(`${label(p)} ${p.name} ${CATEGORY_LABELS[p.category] ?? ""}`, q) ||
+            productQueryFilter(q)(p),
+        )
+        .slice(0, 40)
+    : cat
+      ? inCat.slice(0, 40)
+      : candidates;
+  return (
+    <div className="relative">
+      <input
+        aria-label="Matched product"
+        className={cn(input, invalid && "border-amber-500")}
+        placeholder={placeholder}
+        value={open ? q : current ? label(current) : ""}
+        onFocus={(e) => {
+          setQ("");
+          setOpen(true);
+          e.currentTarget.select();
+        }}
+        onChange={(e) => setQ(e.target.value)}
+        onBlur={() => setOpen(false)}
+      />
+      {open && (
+        <ul className="absolute z-20 mt-1 max-h-72 min-w-72 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 text-sm shadow-lg">
+          <li className="sticky top-0 flex flex-wrap gap-1 bg-popover p-1">
+            {[["", "All"], ...Object.entries(CATEGORY_LABELS)].map(([id, name]) => (
+              <button
+                key={id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setCat(id ?? "");
+                }}
+                className={cn(
+                  "rounded-md border px-2 py-0.5 text-xs",
+                  cat === id
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border hover:bg-secondary",
+                )}
+              >
+                {name}
+              </button>
+            ))}
+          </li>
+          {value && (
+            <li>
+              <button
+                type="button"
+                className="w-full rounded px-2 py-1.5 text-left text-muted-foreground hover:bg-secondary"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange("");
+                  setOpen(false);
+                }}
+              >
+                Clear: use a custom item instead
+              </button>
+            </li>
+          )}
+          {shown.map((p) => (
+            <li key={p.id}>
+              <button
+                type="button"
+                className={cn(
+                  "w-full rounded px-2 py-1.5 text-left hover:bg-secondary",
+                  p.id === value && "bg-secondary font-medium",
+                )}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(p.id);
+                  setOpen(false);
+                }}
+              >
+                {label(p)}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {CATEGORY_LABELS[p.category] ?? p.category}
+                </span>
+              </button>
+            </li>
+          ))}
+          {!shown.length && (
+            <li className="px-2 py-1.5 text-muted-foreground">
+              {q.trim()
+                ? "No product found. Fill the name and price below to add it as a custom item."
+                : "Type to search, e.g. “plb 50” or “63 6 pe63” (size, PN, grade). Or pick a category above."}
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
