@@ -22,6 +22,7 @@ import { PipeSection } from "@/components/pipe-section";
 import { FittingDrawing } from "@/components/fitting-drawing";
 import { pipeSpec } from "@/lib/pipe-spec";
 import {
+  CATEGORY_LABELS,
   fmtMoney,
   fmtNum,
   inWords,
@@ -74,7 +75,7 @@ export function PricePlayground({
 
   // Filters
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<"all" | "pipe" | "sprinkler" | "fitting">("all");
+  const [category, setCategory] = useState<string>("all");
   const [grade, setGrade] = useState<string>("all");
   const [selectedOd, setSelectedOd] = useState<number | "all">("all");
   const [selectedPn, setSelectedPn] = useState<string | "all">("all");
@@ -423,14 +424,10 @@ export function PricePlayground({
         <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/60">
           {/* Category Chips */}
           <div className="flex items-center gap-1">
-            {(
-              [
-                { id: "all", label: "All items" },
-                { id: "pipe", label: "HDPE Pipe" },
-                { id: "sprinkler", label: "Sprinkler" },
-                { id: "fitting", label: "Fittings" },
-              ] as const
-            ).map((c) => (
+            {[
+              { id: "all", label: "All items" },
+              ...Object.entries(CATEGORY_LABELS).map(([id, label]) => ({ id, label })),
+            ].map((c) => (
               <button
                 key={c.id}
                 type="button"

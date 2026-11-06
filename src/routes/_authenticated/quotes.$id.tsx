@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarClock,
@@ -34,6 +34,8 @@ import { fullAddress } from "@/lib/quote-doc";
 import { STATUS_LABELS, buildWhatsAppUrl, computeTotals } from "@/lib/quote";
 
 export const Route = createFileRoute("/_authenticated/quotes/$id")({
+  validateSearch: (s: Record<string, unknown>): { print?: string } =>
+    typeof s["print"] === "string" ? { print: s["print"] } : {},
   head: () => ({ meta: [{ title: "Quote — Tarko CRM" }] }),
   component: QuoteView,
 });
@@ -46,6 +48,14 @@ function QuoteView() {
     queryKey: ["quote", id],
     queryFn: () => getQuote({ data: { id } }),
   });
+  // ?print=1 (from AI Quote > Create quote + PDF): open the print dialog once, choose "Save as PDF"
+  const wantPrint = Route.useSearch().print;
+  useEffect(() => {
+    if (!wantPrint || !data) return;
+    const t = setTimeout(() => window.print(), 600);
+    void navigate({ to: ".", search: {}, replace: true });
+    return () => clearTimeout(t);
+  }, [wantPrint, !!data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error)
     return (

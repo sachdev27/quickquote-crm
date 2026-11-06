@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, Copy, FileUp, Loader2, Sparkles, Trash2, X } from "lucide-react";
+import { Check, Copy, FileText, FileUp, Loader2, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/bottom-nav";
 import { GmailInbox } from "@/components/gmail-inbox";
@@ -11,6 +11,7 @@ import { extractEnquiry } from "@/data/ai";
 import { MAX_FILE_BYTES, type ExtractedItem, type Extraction } from "@/lib/ai/inbound";
 import { AI_DRAFT_KEY, matchItem, quoteQty, replyDraft, type AiDraft } from "@/lib/ai/match";
 import { ACCEPT_EXT, classify } from "@/lib/ai/files";
+import { CATEGORY_LABELS } from "@/lib/quote";
 import { pnNumber } from "@/lib/weights";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +21,9 @@ export const Route = createFileRoute("/_authenticated/ai-quote")({
 });
 
 type Product = Awaited<ReturnType<typeof listProducts>>[number];
-type Row = { item: ExtractedItem; productId: string };
+// productId "" = unmatched, CUSTOM = an item typed here. desc/price/gst override the catalog (blank = catalog).
+const CUSTOM = "__custom";
+type Row = { item: ExtractedItem; productId: string; desc: string; price: string; gst: string };
 
 const toBase64 = (f: File) =>
   new Promise<string>((resolve, reject) => {
@@ -67,7 +70,13 @@ function AiQuotePage() {
     setRows(
       extraction.items.map((item) => {
         const m = matchItem(item, products);
-        return { item, productId: m.status === "matched" ? m.candidates[0]!.id : "" };
+        return {
+          item,
+          productId: m.status === "matched" ? m.candidates[0]!.id : "",
+          desc: "",
+          price: "",
+          gst: "",
+        };
       }),
     );
     if (!extraction.items.length) toast.message("No product lines found in that enquiry");
@@ -109,34 +118,55 @@ function AiQuotePage() {
     );
 
   const byId = new Map(products.map((p) => [p.id, p]));
-  const picked = (rows ?? []).filter((r) => byId.has(r.productId));
-  const unmatched = (rows ?? []).filter((r) => !byId.has(r.productId));
+  const priceOf = (r: Row) => (r.price.trim() === "" ? undefined : Number(r.price));
+  const isCustom = (r: Row) => r.productId === CUSTOM && !!r.desc.trim() && (priceOf(r) ?? 0) > 0;
+  const usable = (r: Row) => byId.has(r.productId) || isCustom(r);
+  const picked = (rows ?? []).filter(usable);
+  const unmatched = (rows ?? []).filter((r) => !usable(r));
+  const titleOf = (r: Row) => r.desc.trim() || label(byId.get(r.productId)!);
   const customerName = customer?.company || customer?.name || null;
 
   const reply = replyDraft({
     customer: customer?.name ?? customerName,
     lines: picked.map((r) => {
-      const p = byId.get(r.productId)!;
+      const p = byId.get(r.productId);
       return {
-        title: label(p),
+        title: titleOf(r),
         qty: r.item.qty ?? 1,
-        unit: r.item.unit === "rolls" ? "roll(s)" : p.unit === "m" ? "m" : "pc",
+        unit: r.item.unit === "rolls" ? "roll(s)" : (p?.unit ?? r.item.unit) === "m" ? "m" : "pc",
       };
     }),
     unmatched: unmatched.map((r) => r.item.raw),
   });
 
-  const createQuote = () => {
+  const createQuote = (pdf = false) => {
+    // same catalog product with no overrides: one line with the quantities added up
     const merged = new Map<string, number>();
-    for (const r of picked)
-      merged.set(
-        r.productId,
-        (merged.get(r.productId) ?? 0) + quoteQty(r.item, byId.get(r.productId)!),
-      );
+    const lines: AiDraft["lines"] = [];
+    for (const r of picked) {
+      const p = byId.get(r.productId);
+      const over = {
+        ...(r.desc.trim() ? { description: r.desc.trim() } : {}),
+        ...(priceOf(r) != null ? { unitPrice: priceOf(r)! } : {}),
+        ...(r.gst.trim() !== "" ? { gstRate: Number(r.gst) } : {}),
+      };
+      if (!p) {
+        const u = r.item.unit;
+        lines.push({
+          productId: null,
+          qty: r.item.qty ?? 1,
+          unit: u === "m" || u === "kg" ? u : "pc",
+          ...over,
+        });
+      } else if (Object.keys(over).length) {
+        lines.push({ productId: p.id, qty: quoteQty(r.item, p), ...over });
+      } else merged.set(p.id, (merged.get(p.id) ?? 0) + quoteQty(r.item, p));
+    }
     const draft: AiDraft = {
       customerName,
       notes: notes ? `AI enquiry: ${notes}` : null,
-      lines: [...merged].map(([productId, qty]) => ({ productId, qty })),
+      lines: [...[...merged].map(([productId, qty]) => ({ productId, qty })), ...lines],
+      ...(pdf ? { pdf: true } : {}),
     };
     try {
       sessionStorage.setItem(AI_DRAFT_KEY, JSON.stringify(draft));
@@ -299,7 +329,8 @@ function AiQuotePage() {
               <ul className="divide-y divide-border">
                 {rows.map((r, i) => {
                   const m = matchItem(r.item, products);
-                  const ok = byId.has(r.productId);
+                  const ok = usable(r);
+                  const custom = r.productId === CUSTOM;
                   return (
                     <li key={i} className="space-y-2 py-3">
                       <div className="flex items-start justify-between gap-2">
@@ -321,14 +352,30 @@ function AiQuotePage() {
                           <option value="">
                             {m.status === "none" ? "No match: pick a product" : "Pick a product…"}
                           </option>
-                          {(m.candidates.length ? m.candidates : products.slice(0, 0)).map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {label(p)}
-                            </option>
-                          ))}
-                          {ok && !m.candidates.some((p) => p.id === r.productId) && (
-                            <option value={r.productId}>{label(byId.get(r.productId)!)}</option>
+                          <option value={CUSTOM}>Custom item (type name and price)</option>
+                          {m.candidates.length > 0 && (
+                            <optgroup label="Best matches">
+                              {m.candidates.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {label(p)}
+                                </option>
+                              ))}
+                            </optgroup>
                           )}
+                          {Object.entries(CATEGORY_LABELS).map(([cat, name]) => (
+                            <optgroup key={cat} label={`All ${name}`}>
+                              {products
+                                .filter(
+                                  (p) =>
+                                    p.category === cat && !m.candidates.some((c) => c.id === p.id),
+                                )
+                                .map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {label(p)}
+                                  </option>
+                                ))}
+                            </optgroup>
+                          ))}
                         </select>
                         <input
                           aria-label="Quantity"
@@ -358,6 +405,33 @@ function AiQuotePage() {
                           <option value="kg">kg</option>
                         </select>
                       </div>
+                      <div className="grid grid-cols-[1fr_6rem_4.5rem] gap-2">
+                        <input
+                          aria-label="Description on quote"
+                          className={input}
+                          placeholder={
+                            custom ? "Item name on the quote" : "Description (blank = catalog name)"
+                          }
+                          value={r.desc}
+                          onChange={(e) => patchRow(i, { desc: e.target.value })}
+                        />
+                        <input
+                          aria-label="Price per unit"
+                          inputMode="decimal"
+                          className={input}
+                          placeholder={custom ? "₹ / unit" : "₹ catalog"}
+                          value={r.price}
+                          onChange={(e) => patchRow(i, { price: e.target.value })}
+                        />
+                        <input
+                          aria-label="GST percent"
+                          inputMode="decimal"
+                          className={input}
+                          placeholder="GST %"
+                          value={r.gst}
+                          onChange={(e) => patchRow(i, { gst: e.target.value })}
+                        />
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         {ok ? (
                           <span className="inline-flex items-center gap-1 text-emerald-600">
@@ -379,8 +453,16 @@ function AiQuotePage() {
               </ul>
 
               <div className="flex flex-wrap gap-2">
-                <Button disabled={!picked.length} onClick={createQuote}>
+                <Button disabled={!picked.length} onClick={() => createQuote()}>
                   Create draft quote ({picked.length})
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!picked.length}
+                  onClick={() => createQuote(true)}
+                  title="Saves the quote, then opens the print dialog: choose Save as PDF"
+                >
+                  <FileText className="h-4 w-4" /> Create quote + PDF
                 </Button>
                 <Button
                   variant="outline"

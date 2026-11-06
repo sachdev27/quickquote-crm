@@ -14,7 +14,7 @@ import {
 } from "@/lib/product-form";
 import { saveProduct } from "@/data/api";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Category, Rate, Unit } from "@/lib/quote";
+import { categoryDefaults, type Category, type Rate } from "@/lib/quote";
 
 export function ProductDialog({
   open,
@@ -54,11 +54,11 @@ export function ProductDialog({
       } else {
         setF({
           category: initialCategory,
-          rate_group_id: groups[0]?.id ?? "",
+          rate_group_id: categoryDefaults(initialCategory).group ?? groups[0]?.id ?? "",
           name: "",
-          unit: initialCategory === "pipe" ? ("m" as Unit) : ("pc" as Unit),
+          unit: categoryDefaults(initialCategory).unit,
           weight: "",
-          gst_rate: initialCategory === "sprinkler" ? 5 : 18,
+          gst_rate: categoryDefaults(initialCategory).gst,
           active: 1,
         });
         focusProductName();

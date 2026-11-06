@@ -1,10 +1,47 @@
-export type Category = "pipe" | "sprinkler" | "fitting";
+export type Category = string; // a categories.id: pipe, sprinkler, fitting, plus any the user adds
 export type Unit = "m" | "pc" | "kg";
 
-export const CATEGORY_LABELS: Record<Category, string> = {
+// Filled from the categories table on every render of the signed-in shell (see _authenticated/route.tsx),
+// so plain lookups work anywhere. Object key order = display order.
+export const CATEGORY_LABELS: Record<string, string> = {
   pipe: "HDPE Pipe",
   sprinkler: "Sprinkler",
   fitting: "Fitting",
+};
+const CATEGORY_DEFAULTS: Record<
+  string,
+  { unit: Unit; gst: number; group: string | null; specs: string[] }
+> = {};
+export function registerCategories(
+  rows: {
+    id: string;
+    label: string;
+    unit: string;
+    gst_rate: number;
+    rate_group_id: string | null;
+    spec_fields: string | null;
+  }[],
+) {
+  for (const k of Object.keys(CATEGORY_LABELS)) delete CATEGORY_LABELS[k];
+  for (const k of Object.keys(CATEGORY_DEFAULTS)) delete CATEGORY_DEFAULTS[k];
+  for (const r of rows) {
+    CATEGORY_LABELS[r.id] = r.label;
+    CATEGORY_DEFAULTS[r.id] = {
+      unit: r.unit as Unit,
+      gst: r.gst_rate,
+      group: r.rate_group_id,
+      specs: (r.spec_fields ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+  }
+}
+export const categoryDefaults = (c: string) =>
+  CATEGORY_DEFAULTS[c] ?? { unit: "pc" as Unit, gst: 18, group: null, specs: [] as string[] };
+export const categoryRank = (c: string) => {
+  const i = Object.keys(CATEGORY_LABELS).indexOf(c);
+  return i < 0 ? 99 : i;
 };
 export const UNIT_LABELS: Record<Unit, string> = { m: "m", pc: "pcs", kg: "kg" };
 export const GST_OPTIONS = [0, 5, 12, 18, 28];

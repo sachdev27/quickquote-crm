@@ -35,6 +35,8 @@ import {
 } from "@/lib/catalog";
 import {
   CATEGORY_LABELS,
+  categoryDefaults,
+  categoryRank,
   buildWhatsAppUrl,
   GST_OPTIONS,
   UNIT_LABELS,
@@ -284,7 +286,7 @@ function NewQuote() {
     brandId;
   const withQuoteBrand = (l: Line) =>
     isBranded(l) ? `${brandName(lineBrandId(l))} ${stripBrand(l.description)}` : l.description;
-  const rank = (c: string) => ["pipe", "sprinkler", "fitting"].indexOf(c);
+  const rank = categoryRank;
   const priced: Draft[] = [...lines]
     .sort((a, b) => rank(a.category) - rank(b.category))
     .map((l) => {
@@ -343,7 +345,9 @@ function NewQuote() {
     (g) => !usedGroups.length || usedGroups.includes(g.id),
   );
 
-  async function save(share = false) {
+  const [autoPdf, setAutoPdf] = useState(0); // >0: lines expected before the AI draft saves itself and opens the PDF
+  const pdfRef = useRef(false);
+  async function save(share = false, pdf = false) {
     const brand = brands.data?.find((b) => b.id === brandId);
     if (!brand) return void toast.error("Add a brand first");
     if (!lines.length) return void toast.error("Add at least one item");
@@ -412,7 +416,11 @@ function NewQuote() {
       qc.invalidateQueries({ queryKey: ["quotes"] });
       qc.invalidateQueries({ queryKey: ["customers"] });
       qc.invalidateQueries({ queryKey: ["enquiries"] });
-      navigate({ to: "/quotes/$id", params: { id } });
+      navigate({
+        to: "/quotes/$id",
+        params: { id },
+        ...(pdf ? { search: { print: "1" } } : {}),
+      });
     } catch (e) {
       tab?.close();
       toast.error(e instanceof Error ? e.message : "Could not save quote");
@@ -424,6 +432,12 @@ function NewQuote() {
   // ⌘S / Ctrl+S or ⌘↵ / Ctrl+Enter saves.
   const saveRef = useRef(save);
   saveRef.current = save;
+  useEffect(() => {
+    if (autoPdf && lines.length >= autoPdf && !saving && !pdfRef.current) {
+      pdfRef.current = true; // one automatic attempt; after that the Save button works as usual
+      void saveRef.current(false, true);
+    }
+  }, [autoPdf, lines.length, saving]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing =
@@ -539,7 +553,7 @@ function NewQuote() {
       name: "",
       unit: cat === "pipe" ? "m" : "pc",
       weight: "",
-      gst_rate: cat === "sprinkler" ? 5 : 18,
+      gst_rate: categoryDefaults(cat ?? "fitting").gst,
       active: 1,
     });
     setProductDialogOpen(true);
@@ -705,9 +719,16 @@ function NewQuote() {
       : p.category === "sprinkler"
         ? quoteTitle(p)
         : `${p.name}${p.grade ? ` · ${p.grade}` : ""}`;
-  function addFromCatalogQty(p: Product, qty: number, bid?: string) {
+  function addFromCatalogQty(
+    p: Product,
+    qty: number,
+    bid?: string,
+    over?: { description?: string; unitPrice?: number; gstRate?: number },
+  ) {
     const lb = p.brand_id || bid || brandId;
-    const existing = lines.find((l) => l.productId === p.id && lineBrandId(l) === lb);
+    const existing = over
+      ? undefined
+      : lines.find((l) => l.productId === p.id && lineBrandId(l) === lb);
     if (existing) {
       setFocusKey(existing.key);
       return patch(existing.key, { qty: existing.qty + qty });
@@ -718,18 +739,34 @@ function NewQuote() {
         brandId: lb,
         rateGroupId: p.rate_group_id,
         category: p.category as Category,
-        description: quoteTitle(p),
+        description: over?.description || quoteTitle(p),
         hsn: p.hsn,
         unit: p.unit as Unit,
         qty,
         weightKg: p.weight_kg,
         rateKg: rateOf(p.rate_group_id, p.weight_kg, lb),
         unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, lb),
-        gstRate: p.gst_rate,
+        gstRate: over?.gstRate ?? p.gst_rate,
       },
       true,
       true,
     );
+    if (over?.unitPrice != null) {
+      // typed price wins: keep the weight, back out the ₹/kg that gives exactly this price
+      const price = over.unitPrice;
+      setLines((all) =>
+        all.map((x, i) =>
+          i === all.length - 1
+            ? {
+                ...x,
+                unitPrice: price,
+                rateKg: p.weight_kg > 0 ? price / p.weight_kg : 0,
+                rateEdited: true,
+              }
+            : x,
+        ),
+      );
+    }
   }
 
   // Customer: type to search; anything not matching becomes a new customer (phone/GSTIN fields appear).
@@ -811,9 +848,27 @@ function NewQuote() {
     if (draft.customerName) onCustomer(draft.customerName);
     if (draft.notes) setNotes(draft.notes);
     for (const l of draft.lines) {
-      const p = prods.data.find((x) => x.id === l.productId);
-      if (p) addFromCatalogQty(p, l.qty, brandId);
+      const p = l.productId ? prods.data.find((x) => x.id === l.productId) : undefined;
+      if (p) addFromCatalogQty(p, l.qty, brandId, l);
+      else if (l.description && l.unitPrice != null)
+        addLine(
+          {
+            productId: null,
+            rateGroupId: null,
+            category: "fitting",
+            description: l.description,
+            hsn: null,
+            unit: l.unit ?? "pc",
+            qty: l.qty,
+            weightKg: 0,
+            rateKg: 0,
+            unitPrice: l.unitPrice,
+            gstRate: l.gstRate ?? 18,
+          },
+          true,
+        );
     }
+    if (draft.pdf) setAutoPdf(draft.lines.length);
     toast.message("Draft from AI enquiry: check rates and quantities");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiMode, aiLoaded, prods.data, brands.data, customers.data, brandId]);
@@ -1334,7 +1389,7 @@ function NewQuote() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
-                          {CATEGORY_LABELS[l.category]} · GST {l.gstRate}%
+                          {CATEGORY_LABELS[l.category]!} · GST {l.gstRate}%
                           {isNonIsiLine(l) ? " · Non-ISI" : ""}
                         </p>
                         <p className="font-semibold leading-snug">{l.description}</p>
@@ -1456,7 +1511,7 @@ function NewQuote() {
                             <p className="text-sm font-medium leading-tight">{l.description}</p>
                             <p className="text-xs text-muted-foreground">
                               {[
-                                CATEGORY_LABELS[l.category],
+                                CATEGORY_LABELS[l.category]!,
                                 isNonIsiLine(l) && "Non-ISI",
                                 l.rateEdited && !l.fromSaved && "₹/kg edited",
                               ]
@@ -2033,7 +2088,7 @@ function CatalogPanel({
         onChange={setCat}
         options={(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
           value: c,
-          label: CATEGORY_LABELS[c],
+          label: CATEGORY_LABELS[c]!,
         }))}
       />
       {cat === "pipe" ? (
@@ -2151,7 +2206,7 @@ function CatalogPanel({
           onClick={() => onNewProduct?.(cat)}
         >
           <Plus className="h-3.5 w-3.5" />
-          <span>New {CATEGORY_LABELS[cat].toLowerCase()} in catalog</span>
+          <span>New {CATEGORY_LABELS[cat]!.toLowerCase()} in catalog</span>
         </Button>
         <Button
           variant="ghost"
@@ -2466,7 +2521,7 @@ function AddItemSheet({
           options={[
             ...(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
               value: c,
-              label: CATEGORY_LABELS[c],
+              label: CATEGORY_LABELS[c]!,
             })),
             { value: "custom" as const, label: "Custom" },
           ]}
@@ -2649,7 +2704,7 @@ function AddItemSheet({
           <>
             {!listItems.length && (
               <p className="text-sm text-muted-foreground">
-                No {CATEGORY_LABELS[cat].toLowerCase()} products yet. Add them under Products, or
+                No {CATEGORY_LABELS[cat]!.toLowerCase()} products yet. Add them under Products, or
                 use Custom.
               </p>
             )}
@@ -2694,15 +2749,14 @@ function AddItemSheet({
                 setCu({
                   ...cu,
                   cat: c,
-                  gst: c === "sprinkler" ? 5 : 18,
+                  gst: categoryDefaults(c).gst,
                   card: c === "sprinkler" ? "SPRINKLER" : cu.card,
                 })
               }
-              options={[
-                { value: "fitting" as Category, label: "Fitting" },
-                { value: "sprinkler" as Category, label: "Sprinkler" },
-                { value: "pipe" as Category, label: "Pipe / other" },
-              ]}
+              options={(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
+                value: c,
+                label: CATEGORY_LABELS[c]!,
+              }))}
             />
             <Field label="Item name">
               <input

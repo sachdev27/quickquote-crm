@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { listBrands, listPricing, listProducts } from "@/data/api";
 import { LAST_BRAND, LAST_PRESET } from "@/lib/catalog";
 import {
+  CATEGORY_LABELS,
   UNIT_LABELS,
   fmtNum,
   ratePerKg,
@@ -102,12 +103,15 @@ function PriceList() {
   });
   // Fittings are bought in and priced on the quote; sprinkler weights belong to a brand.
   const others = all.filter(
-    (p) => p.category === "sprinkler" && (!p.brand_id || p.brand_id === brandId),
+    (p) =>
+      p.category === "sprinkler"
+        ? !p.brand_id || p.brand_id === brandId
+        : !["pipe", "fitting"].includes(p.category) && p.weight_kg > 0, // categories you added, e.g. PLB duct
   );
   const gstRates = uniq(
     all.map(
       (p) =>
-        `${p.category === "pipe" ? "HDPE pipe" : p.category === "sprinkler" ? "Sprinkler pipe" : "Fittings"} ${p.gst_rate}%`,
+        `${p.category === "pipe" ? "HDPE pipe" : p.category === "sprinkler" ? "Sprinkler pipe" : p.category === "fitting" ? "Fittings" : (CATEGORY_LABELS[p.category] ?? p.category)} ${p.gst_rate}%`,
     ),
   );
 

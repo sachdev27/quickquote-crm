@@ -2,9 +2,10 @@ import { Calculator } from "lucide-react";
 import { toast } from "sonner";
 import { Chips, Field, inputCls } from "@/components/qq";
 import { Button } from "@/components/ui/button";
-import type { ProductForm } from "@/lib/product-form";
+import { parseSpecs, stringifySpecs, type ProductForm } from "@/lib/product-form";
 import {
   CATEGORY_LABELS,
+  categoryDefaults,
   GST_OPTIONS,
   UNIT_LABELS,
   fmtMoney,
@@ -46,22 +47,28 @@ export function ProductFields({
   };
   return (
     <>
-      <Chips<Category>
-        label="Category"
-        value={(prod.category ?? "fitting") as Category}
-        onChange={(c) =>
-          setProd({
-            ...prod,
-            category: c,
-            gst_rate: c === "sprinkler" ? 5 : 18,
-            unit: c === "pipe" ? "m" : (prod.unit ?? "pc"),
-          })
-        }
-        options={(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
-          value: c,
-          label: CATEGORY_LABELS[c],
-        }))}
-      />
+      <Field label="Category">
+        <select
+          value={prod.category ?? "fitting"}
+          onChange={(e) => {
+            const c = e.target.value as Category;
+            setProd({
+              ...prod,
+              category: c,
+              gst_rate: categoryDefaults(c).gst,
+              unit: categoryDefaults(c).unit,
+              ...(categoryDefaults(c).group ? { rate_group_id: categoryDefaults(c).group! } : {}),
+            });
+          }}
+          className={inputCls}
+        >
+          {(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => (
+            <option key={c} value={c}>
+              {CATEGORY_LABELS[c]!}
+            </option>
+          ))}
+        </select>
+      </Field>
       <Field label="Name (as printed on quote)">
         <input
           id="product-name"
@@ -161,6 +168,24 @@ export function ProductFields({
               className={inputCls}
             />
           </Field>
+        </div>
+      )}
+      {categoryDefaults(prod.category ?? "").specs.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          {categoryDefaults(prod.category ?? "").specs.map((name) => (
+            <Field key={name} label={name}>
+              <input
+                value={parseSpecs(prod.specs)[name] ?? ""}
+                onChange={(e) =>
+                  setProd({
+                    ...prod,
+                    specs: stringifySpecs({ ...parseSpecs(prod.specs), [name]: e.target.value }),
+                  })
+                }
+                className={inputCls}
+              />
+            </Field>
+          ))}
         </div>
       )}
       <Field label="Sold per">

@@ -98,6 +98,7 @@ export const products = sqliteTable("products", {
   gst_rate: real("gst_rate").notNull().default(18),
   hsn: text("hsn"),
   brand_id: text("brand_id"), // sprinkler pipe only: its weight is that brand's
+  specs: text("specs"), // JSON {field: value} for the category's custom specification fields
   length_m: real("length_m"), // sprinkler pipe only: 6 or 12 m
   sort: integer("sort").notNull().default(0),
   active: integer("active").notNull().default(1),
@@ -250,6 +251,16 @@ export const invoice_items = sqliteTable("invoice_items", {
   rate_kg: real("rate_kg").notNull().default(0),
   unit_price: real("unit_price").notNull(),
   gst_rate: real("gst_rate").notNull().default(18),
+});
+
+export const categories = sqliteTable("categories", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  unit: text("unit").notNull().default("pc"),
+  gst_rate: real("gst_rate").notNull().default(18),
+  rate_group_id: text("rate_group_id"),
+  spec_fields: text("spec_fields"),
+  sort: integer("sort").notNull().default(0),
 });
 
 // Key/value settings (default HSN/SAC and GST for fittings, ...).

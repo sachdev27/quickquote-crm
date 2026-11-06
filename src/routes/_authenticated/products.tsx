@@ -20,6 +20,7 @@ import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, Field, inputCls } from "@/components/qq";
 import { Switch } from "@/components/ui/switch";
 import { BulkHsn } from "@/components/bulk-hsn";
+import { CategoryManager } from "@/components/category-manager";
 import { Button } from "@/components/ui/button";
 import { PricePlayground } from "@/components/price-playground";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -55,6 +56,7 @@ import {
 import {
   CATEGORY_LABELS,
   UNIT_LABELS,
+  categoryDefaults,
   costPerKg,
   fmtMoney,
   fmtNum,
@@ -582,28 +584,39 @@ function ProductsAdmin() {
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="flex items-center justify-between px-4 pt-4">
                     <p className="font-semibold">{prod.id ? "Edit product" : "New product"}</p>
-                    {prod.id && (
-                      <span className="flex">
-                        <button
-                          type="button"
-                          aria-label="Duplicate product"
-                          title="Duplicate product"
-                          className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                          onClick={() => duplicate(prod)}
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Remove product"
-                          title="Remove product"
-                          className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-destructive"
-                          onClick={removeProduct}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </span>
-                    )}
+                    <span className="flex">
+                      {prod.id && (
+                        <span className="flex">
+                          <button
+                            type="button"
+                            aria-label="Duplicate product"
+                            title="Duplicate product"
+                            className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                            onClick={() => duplicate(prod)}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Remove product"
+                            title="Remove product"
+                            className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-destructive"
+                            onClick={removeProduct}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        aria-label="Close"
+                        title="Close"
+                        className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        onClick={() => setProd(null)}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </span>
                   </div>
                   {prod.id && <PresetPreview product={prod} pricing={scoped} />}
                   <div className="flex min-h-0 flex-1 flex-col pt-3">{productForm}</div>
@@ -2813,7 +2826,7 @@ function ProductList({
             { value: "all" as const, label: "All" },
             ...(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
               value: c,
-              label: CATEGORY_LABELS[c],
+              label: CATEGORY_LABELS[c]!,
             })),
           ]}
         />
@@ -2845,6 +2858,7 @@ function ProductList({
           Incl. GST <Switch checked={withGst} onCheckedChange={setWithGst} />
         </label>
         <div className="flex gap-2 lg:ml-auto">
+          <CategoryManager />
           <BulkHsn products={products} />
           <Button
             variant="outline"
@@ -3372,11 +3386,13 @@ function parseProductCsv(text: string): { rows: ImportRow[]; errors: string[] } 
     const r = raw as Partial<Record<(typeof CSV_COLS)[number], string>>;
     const line = `Row ${i + 2}`;
     const category = (r.category || "pipe").toLowerCase();
-    const unit = (r.unit || (category === "pipe" ? "m" : "pc")).toLowerCase();
+    const unit = (r.unit || categoryDefaults(category).unit).toLowerCase();
     const weight = Number(r.weight_kg);
     const size = r.size_mm ? Number(r.size_mm) : null;
-    if (!["pipe", "sprinkler", "fitting"].includes(category))
-      return void errors.push(`${line}: category must be pipe, sprinkler or fitting`);
+    if (!(category in CATEGORY_LABELS))
+      return void errors.push(
+        `${line}: category must be one of ${Object.keys(CATEGORY_LABELS).join(", ")}`,
+      );
     if (!["m", "pc", "kg"].includes(unit))
       return void errors.push(`${line}: unit must be m, pc or kg`);
     if (!r.name) return void errors.push(`${line}: name is required`);
@@ -3401,9 +3417,7 @@ function parseProductCsv(text: string): { rows: ImportRow[]; errors: string[] } 
       weight_kg: weight,
       gst_rate:
         r.gst_rate === "" || r.gst_rate == null
-          ? category === "sprinkler"
-            ? 5
-            : 18
+          ? categoryDefaults(category).gst
           : Number(r.gst_rate) || 0,
     });
   });
