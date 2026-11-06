@@ -30,11 +30,25 @@ export const productPayload = (p: ProductForm, active = true) => ({
   size_mm: p.size_mm ?? null,
   brand_id: p.category === "sprinkler" ? (p.brand_id ?? null) : null,
   length_m: p.category === "sprinkler" ? (p.length_m ?? null) : null,
+  specs: p.specs ?? null,
   unit: (p.unit ?? "pc") as Unit,
   weight_kg: n(p.weight),
   gst_rate: p.gst_rate ?? 18,
   active,
 });
+
+// products.specs is JSON {field: value}; blank values are dropped.
+export const parseSpecs = (json: string | null | undefined): Record<string, string> => {
+  try {
+    return json ? (JSON.parse(json) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+};
+export const stringifySpecs = (o: Record<string, string>) => {
+  const kept = Object.fromEntries(Object.entries(o).filter(([, v]) => v.trim()));
+  return Object.keys(kept).length ? JSON.stringify(kept) : null;
+};
 
 // Focus and select the name field (after a sheet's open animation).
 export const focusProductName = () =>

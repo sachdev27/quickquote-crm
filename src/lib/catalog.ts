@@ -16,7 +16,7 @@ type P = {
 export function sectionOf(p: P) {
   // Fittings are grouped by family, which is kept in the grade column (Electrofusion, Spigot moulded, ...).
   if (p.category === "fitting" && p.grade) return `Fitting · ${p.grade}`;
-  if (p.category !== "pipe") return CATEGORY_LABELS[p.category as Category];
+  if (p.category !== "pipe") return CATEGORY_LABELS[p.category] ?? p.category;
   return `HDPE ${p.grade ?? ""} pipe`;
 }
 
@@ -67,7 +67,13 @@ export const normalizePn = (s: string) => {
 // Printed description of a catalog product: Brand (pipes, sprinklers) · name · PN rating, each only if
 // present and not already written in the name.
 export const quoteTitle = (
-  p: { category: string; name: string; pn: string | null; grade?: string | null },
+  p: {
+    category: string;
+    name: string;
+    pn: string | null;
+    grade?: string | null;
+    specs?: string | null;
+  },
   brand?: string,
 ) => {
   // fittings: "4-way 63 mm · Electrofusion" (the family tells electrofusion and spigot apart)
@@ -76,12 +82,22 @@ export const quoteTitle = (
       ? `${p.name} · ${p.grade}`
       : p.name;
   const has = (t: string) => p.name.toLowerCase().includes(t.toLowerCase());
+  let specs = "";
+  try {
+    // custom specifications print after the name: "(Colour: Yellow, Wall thickness (mm): 3)"
+    specs = Object.entries(JSON.parse(p.specs ?? "{}") as Record<string, string>)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ");
+  } catch {
+    /* ignore bad JSON */
+  }
   const pn = p.pn ? normalizePn(p.pn) : "";
   return [
     (p.category === "pipe" || p.category === "sprinkler") && brand && !has(brand) ? brand : "",
     p.category === "sprinkler" && !has("sprinkler") ? "Sprinkler Pipe" : "",
     p.name,
     pn && !has(pn) ? pn : "",
+    specs ? `(${specs})` : "",
   ]
     .filter(Boolean)
     .join(" ");

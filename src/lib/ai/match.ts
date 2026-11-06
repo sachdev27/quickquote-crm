@@ -85,5 +85,14 @@ export const AI_DRAFT_KEY = "qq-ai-draft";
 export interface AiDraft {
   customerName: string | null;
   notes: string | null;
-  lines: { productId: string; qty: number }[];
+  // productId null = a custom item typed on the AI page; description/unitPrice/gstRate override the catalog
+  lines: {
+    productId: string | null;
+    qty: number;
+    description?: string;
+    unitPrice?: number;
+    gstRate?: number;
+    unit?: "m" | "pc" | "kg";
+  }[];
+  pdf?: boolean; // save the quote straight away and open the print/PDF dialog
 }

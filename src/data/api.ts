@@ -28,6 +28,7 @@ import {
   invoices,
   invoice_items,
   settings,
+  categories,
 } from "./schema";
 
 const text = z.string().trim().max(1000);
@@ -37,7 +38,7 @@ const opt = text
   .optional();
 const money = z.number().finite().min(0).max(1e9);
 const gst = z.number().min(0).max(100);
-const category = z.enum(["pipe", "sprinkler", "fitting"]);
+const category = z.string().trim().min(1).max(40);
 const unit = z.enum(["m", "pc", "kg"]);
 
 // D1 allows at most 100 bound parameters per statement, so long id lists go in chunks.
@@ -533,6 +534,100 @@ export const deleteGroup = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const listCategories = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .handler(async () => (await getDb()).select().from(categories).orderBy(asc(categories.sort)));
+
+export const saveCategory = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(
+    z.object({
+      id: z.string().optional(), // set = edit; the id never changes, products point at it
+      label: text.min(1),
+      unit,
+      gst_rate: gst,
+      spec_fields: opt,
+    }),
+  )
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const { id, ...rest } = data;
+    const all = await db.select().from(categories);
+    if (id) {
+      await db.update(categories).set(rest).where(eq(categories.id, id));
+      // keep the pricing card's name in step unless another category shares it
+      const own = all.find((c) => c.id === id);
+      if (
+        own?.rate_group_id &&
+        all.filter((c) => c.rate_group_id === own.rate_group_id).length === 1
+      )
+        await db
+          .update(rate_groups)
+          .set({ name: rest.label })
+          .where(eq(rate_groups.id, own.rate_group_id));
+      return { id };
+    }
+    // new category = category + its own rate group + a zeroed rate row for every profile x preset
+    const slug =
+      rest.label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "cat";
+    const groups = await db.select().from(rate_groups);
+    const suffix = (taken: boolean) => (taken ? `-${Date.now().toString(36)}` : "");
+    const newId = `${slug}${suffix(all.some((c) => c.id === slug))}`;
+    const groupId = `${slug.toUpperCase().slice(0, 14)}${suffix(groups.some((g) => g.id === slug.toUpperCase().slice(0, 14)))}`;
+    const [profiles, presets] = await Promise.all([
+      db.select({ id: rate_profiles.id }).from(rate_profiles),
+      db.select({ id: rate_presets.id }).from(rate_presets),
+    ]);
+    await db.batch([
+      db.insert(rate_groups).values({ id: groupId, name: rest.label, sort: 100 }),
+      db
+        .insert(categories)
+        .values({ ...rest, id: newId, rate_group_id: groupId, sort: all.length + 1 }),
+      ...profiles.flatMap((p) =>
+        presets.map((s) =>
+          db.insert(rates).values({ profile_id: p.id, preset_id: s.id, group_id: groupId }),
+        ),
+      ),
+    ]);
+    return { id: newId };
+  });
+
+export const deleteCategory = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const [used] = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(products)
+      .where(eq(products.category, data.id));
+    if (used && used.n > 0)
+      throw new Error(`${used.n} products use this category. Move or delete them first.`);
+    const [cat] = await db.select().from(categories).where(eq(categories.id, data.id));
+    await db.delete(categories).where(eq(categories.id, data.id));
+    // drop its pricing card too, unless another category or a product still uses it
+    const g = cat?.rate_group_id;
+    if (g) {
+      const [other] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(categories)
+        .where(eq(categories.rate_group_id, g));
+      const [prod] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(products)
+        .where(eq(products.rate_group_id, g));
+      if (!other?.n && !prod?.n)
+        await db.batch([
+          db.delete(rates).where(eq(rates.group_id, g)),
+          db.delete(rate_groups).where(eq(rate_groups.id, g)),
+        ]);
+    }
+    return { ok: true };
+  });
+
 export const listProducts = createServerFn({ method: "GET" })
   .middleware([authed])
   .handler(async () =>
@@ -563,6 +658,7 @@ export const saveProduct = createServerFn({ method: "POST" })
       gst_rate: gst,
       brand_id: z.string().nullable().optional(),
       length_m: z.number().positive().max(100).nullable().optional(),
+      specs: opt,
       active: z.boolean().default(true),
     }),
   )
