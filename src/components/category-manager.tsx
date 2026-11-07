@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/sheet";
 import { Button } from "@/components/ui/button";
 import { RatesGrid } from "@/components/rates-grid";
+import { WeightMatrix } from "@/components/weight-matrix";
 import {
   deleteCategory,
   deleteProductGroup,
@@ -503,6 +504,12 @@ function Detail({
         </label>
       </div>
 
+      {cat && cat.weight_method === "matrix" && (
+        <section>
+          <h4 className="mb-2 text-sm font-semibold">Weights (kg per metre)</h4>
+          <WeightMatrix categoryId={cat.id} classLabel={cat.class_label} />
+        </section>
+      )}
       {cat ? (
         <section>
           <h4 className="mb-2 text-sm font-semibold">Rates</h4>

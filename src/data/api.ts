@@ -34,6 +34,7 @@ import {
   weight_matrix,
 } from "./schema";
 import { groupIdFrom, normGrade, rateRowsFor, removedGradesInUse } from "@/lib/category-rules";
+import { planMatrixSync } from "@/lib/matrix-sync";
 
 const LEGACY_GROUPS = ["PE63", "PE80", "PE100", "SPRINKLER", "FITTING", "PLB"];
 
@@ -720,6 +721,74 @@ async function groupOf(
     .where(eq(categories.id, category));
   return groupIdFrom(category, grade ?? null, (c?.grades ?? "").split(",").filter(Boolean));
 }
+
+// Weight matrix (size x class → kg/m) of a subcategory whose weight comes from a table (DWC, ...).
+export const listMatrix = createServerFn({ method: "GET" })
+  .middleware([authed])
+  .validator(z.object({ category_id: z.string() }))
+  .handler(async ({ data }) =>
+    (await getDb())
+      .select()
+      .from(weight_matrix)
+      .where(eq(weight_matrix.category_id, data.category_id))
+      .orderBy(asc(weight_matrix.sort), asc(weight_matrix.size_mm)),
+  );
+
+const matrixCell = z.object({
+  id: z.string().min(1).max(64),
+  grade: z.string().trim().max(20).nullable(),
+  size_mm: z.number().positive().max(5000),
+  size_label: text.min(1).max(40),
+  class: text.min(1).max(20),
+  kg_per_m: z.number().finite().min(0).max(10000),
+  od_mm: z.number().positive().max(5000).nullable(),
+  id_mm: z.number().positive().max(5000).nullable(),
+  wall_mm: z.number().positive().max(500).nullable(),
+});
+
+// Replaces the subcategory's matrix and brings its products in line (add, update, deactivate; never delete).
+export const saveMatrix = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(z.object({ category_id: z.string(), cells: z.array(matrixCell).max(2000) }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const [cat] = await db.select().from(categories).where(eq(categories.id, data.category_id));
+    if (!cat) throw new Error("Category not found");
+    const grades = cat.grades.split(",").filter(Boolean);
+    const cells = data.cells.map((c, i) => ({
+      ...c,
+      category_id: cat.id,
+      grade: c.grade ? normGrade(c.grade) : null,
+      sort: i,
+    }));
+    const [prev, prods] = await Promise.all([
+      db.select().from(weight_matrix).where(eq(weight_matrix.category_id, cat.id)),
+      db.select().from(products).where(eq(products.category, cat.id)),
+    ]);
+    const plan = planMatrixSync(cells, prev, grades, prods, cat.label);
+    await db.batch([
+      db.delete(weight_matrix).where(eq(weight_matrix.category_id, cat.id)),
+      ...cells.map((c) => db.insert(weight_matrix).values(c)),
+      ...plan.insert.map((p) =>
+        db.insert(products).values({
+          ...p,
+          id: crypto.randomUUID(),
+          gst_rate: cat.gst_rate,
+          sort: 1000,
+          active: 1,
+        }),
+      ),
+      ...plan.update.map(({ id, ...p }) => db.update(products).set(p).where(eq(products.id, id))),
+      ...(plan.deactivate.length
+        ? [db.update(products).set({ active: 0 }).where(inArray(products.id, plan.deactivate))]
+        : []),
+    ]);
+    return {
+      inserted: plan.insert.length,
+      updated: plan.update.length,
+      deactivated: plan.deactivate.length,
+    };
+  });
 
 export const listProducts = createServerFn({ method: "GET" })
   .middleware([authed])

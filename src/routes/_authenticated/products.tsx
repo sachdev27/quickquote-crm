@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { groupIdFor, isPieceGroup, rateKgFor } from "@/lib/pricing";
+import { groupIdFor, isPieceGroup, priceMethodOf, rateKgFor } from "@/lib/pricing";
 import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, Field, inputCls } from "@/components/qq";
 import { Switch } from "@/components/ui/switch";
@@ -549,7 +549,7 @@ function ProductsAdmin() {
             />
             <BrandRawCard
               brands={brands.data ?? []}
-              groups={pricing.data.groups}
+              groups={pricing.data.groups.filter((g) => priceMethodOf(g.id) !== "fixed")}
               rows={pricing.data.brandRaw.filter((b) => b.profile_id === profileId)}
               profileId={profileId}
               profileName={profileName(profileId)}
@@ -1178,71 +1178,73 @@ function PricingGrid({
               </tr>
             </thead>
             <tbody>
-              {pricing.groups.map((g) => (
-                <tr key={g.id}>
-                  <td className="sticky left-0 border-t border-border/60 bg-card py-2 pr-2 lg:py-0.5">
-                    <button
-                      type="button"
-                      className="text-left text-sm font-medium underline-offset-4 hover:underline"
-                      onClick={() => onEditGroup(g)}
-                    >
-                      {g.name}
-                    </button>
-                  </td>
-                  {pricing.presets.map((p) => {
-                    const r = rateRow(p.id, g.id);
-                    return (
-                      <td key={p.id} className="border-t border-border/60 p-1">
-                        <button
-                          type="button"
-                          onClick={() => onEdit(p.id, g)}
-                          className="w-full rounded-lg px-2 py-1.5 text-right active:bg-secondary hover:bg-secondary lg:py-0.5"
-                        >
-                          {r ? (
-                            <span className="flex items-start justify-end gap-3">
-                              <span>
-                                <span className="block text-base font-bold lg:text-sm">
-                                  {isPieceGroup(g.id)
-                                    ? sprinklerSample
-                                      ? `${fmtMoney(sprinklerPrice(r, sprinklerSample.weight_kg))}/pc`
-                                      : `+${fmtMoney(r.production_kg + r.transport_kg + r.margin)}/pc`
-                                    : fmtMoney(ratePerKg(r))}
-                                </span>
-                                <span
-                                  className={`block text-[10px] ${r.brandApplied ? "font-semibold text-primary" : "text-muted-foreground"}`}
-                                >
-                                  {isPieceGroup(g.id)
-                                    ? `${sprinklerSample ? `${fmtNum(r.raw_kg)} × ${fmtNum(sprinklerSample.weight_kg)} kg` : "raw × wt"} + ${fmtNum(r.production_kg)} + ${fmtNum(r.transport_kg)} + ${fmtNum(r.margin)}`
-                                    : parts(r)}
-                                  {r.brandApplied && " · brand raw"}
-                                </span>
-                              </span>
-                              {r.raw_kg_non_isi != null && !isPieceGroup(g.id) && (
-                                <>
-                                  <span
-                                    className="self-stretch border-l border-border"
-                                    aria-hidden
-                                  />
-                                  <span className="text-amber-700">
-                                    <span className="block text-base font-bold lg:text-sm">
-                                      {fmtMoney(ratePerKg(r, true))}
-                                    </span>
-                                    <span className="block text-[10px] font-semibold">
-                                      Non-ISI · raw {fmtNum(r.raw_kg_non_isi)}
-                                    </span>
+              {pricing.groups
+                .filter((g) => priceMethodOf(g.id) !== "fixed")
+                .map((g) => (
+                  <tr key={g.id}>
+                    <td className="sticky left-0 border-t border-border/60 bg-card py-2 pr-2 lg:py-0.5">
+                      <button
+                        type="button"
+                        className="text-left text-sm font-medium underline-offset-4 hover:underline"
+                        onClick={() => onEditGroup(g)}
+                      >
+                        {g.name}
+                      </button>
+                    </td>
+                    {pricing.presets.map((p) => {
+                      const r = rateRow(p.id, g.id);
+                      return (
+                        <td key={p.id} className="border-t border-border/60 p-1">
+                          <button
+                            type="button"
+                            onClick={() => onEdit(p.id, g)}
+                            className="w-full rounded-lg px-2 py-1.5 text-right active:bg-secondary hover:bg-secondary lg:py-0.5"
+                          >
+                            {r ? (
+                              <span className="flex items-start justify-end gap-3">
+                                <span>
+                                  <span className="block text-base font-bold lg:text-sm">
+                                    {isPieceGroup(g.id)
+                                      ? sprinklerSample
+                                        ? `${fmtMoney(sprinklerPrice(r, sprinklerSample.weight_kg))}/pc`
+                                        : `+${fmtMoney(r.production_kg + r.transport_kg + r.margin)}/pc`
+                                      : fmtMoney(ratePerKg(r))}
                                   </span>
-                                </>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">not set</span>
-                          )}
-                        </button>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                                  <span
+                                    className={`block text-[10px] ${r.brandApplied ? "font-semibold text-primary" : "text-muted-foreground"}`}
+                                  >
+                                    {isPieceGroup(g.id)
+                                      ? `${sprinklerSample ? `${fmtNum(r.raw_kg)} × ${fmtNum(sprinklerSample.weight_kg)} kg` : "raw × wt"} + ${fmtNum(r.production_kg)} + ${fmtNum(r.transport_kg)} + ${fmtNum(r.margin)}`
+                                      : parts(r)}
+                                    {r.brandApplied && " · brand raw"}
+                                  </span>
+                                </span>
+                                {r.raw_kg_non_isi != null && !isPieceGroup(g.id) && (
+                                  <>
+                                    <span
+                                      className="self-stretch border-l border-border"
+                                      aria-hidden
+                                    />
+                                    <span className="text-amber-700">
+                                      <span className="block text-base font-bold lg:text-sm">
+                                        {fmtMoney(ratePerKg(r, true))}
+                                      </span>
+                                      <span className="block text-[10px] font-semibold">
+                                        Non-ISI · raw {fmtNum(r.raw_kg_non_isi)}
+                                      </span>
+                                    </span>
+                                  </>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">not set</span>
+                            )}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
