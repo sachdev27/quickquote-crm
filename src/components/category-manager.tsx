@@ -16,7 +16,7 @@ import {
 import { GST_OPTIONS, UNIT_LABELS, fmtMoney, ratePerKg, type Unit } from "@/lib/quote";
 import { cn } from "@/lib/utils";
 
-type Cat = Awaited<ReturnType<typeof listCategories>>[number];
+type Cat = Awaited<ReturnType<typeof listCategories>>["categories"][number];
 type Pricing = Awaited<ReturnType<typeof listPricing>>;
 
 const field =
@@ -36,7 +36,7 @@ export function CategoryManager() {
   });
   const pricing = useQuery({ queryKey: ["pricing"], queryFn: () => listPricing(), enabled: open });
   const prods = useQuery({ queryKey: ["products"], queryFn: () => listProducts(), enabled: open });
-  const list = cats.data ?? [];
+  const list = cats.data?.categories ?? [];
   const current = list.find((c) => c.id === sel) ?? (sel === NEW ? null : list[0]);
   const count = (id: string) => (prods.data ?? []).filter((p) => p.category === id).length;
 
@@ -193,7 +193,19 @@ function Detail({
     const ok = await run(
       async () => {
         ({ id: newId } = await saveCategory({
-          data: { id: cat?.id, label, unit, gst_rate: n(gst), spec_fields: specs },
+          data: {
+            id: cat?.id,
+            label,
+            unit,
+            gst_rate: n(gst),
+            spec_fields: specs,
+            parent_id: cat?.parent_id ?? "hdpe",
+            grades: (cat?.grades ?? "").split(",").filter(Boolean),
+            price_method: (cat?.price_method ?? "weight_rate") as "weight_rate",
+            weight_method: (cat?.weight_method ?? "none") as "none",
+            drawing: (cat?.drawing ?? "none") as "none",
+            class_label: cat?.class_label ?? "",
+          },
         }));
         if (own)
           for (const p of pricing.presets) {

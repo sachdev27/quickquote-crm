@@ -30,7 +30,12 @@ import {
   settings,
   categories,
   deletion_log,
+  product_groups,
+  weight_matrix,
 } from "./schema";
+import { groupIdFrom, normGrade, rateRowsFor, removedGradesInUse } from "@/lib/category-rules";
+
+const LEGACY_GROUPS = ["PE63", "PE80", "PE100", "SPRINKLER", "FITTING", "PLB"];
 
 const text = z.string().trim().max(1000);
 const opt = text
@@ -282,15 +287,15 @@ export const listPricing = createServerFn({ method: "GET" })
       db.select().from(brand_raw),
     ]);
     const activeProfileId = profiles.find((p) => p.active)?.id ?? profiles[0]?.id ?? "";
-    // Fittings are bought in: no rate card, their price is typed on the quote.
-    const notFitting = <T extends { group_id: string }>(x: T) => x.group_id !== "FITTING";
+    // Old groups from before the catalog tree (migration 0023) are kept only as a safety net.
+    const live = (id: string) => !LEGACY_GROUPS.includes(id);
     return {
       profiles,
       activeProfileId,
       presets,
-      groups: groups.filter((g) => g.id !== "FITTING"),
-      rates: values.filter(notFitting),
-      brandRaw: brandRaw.filter(notFitting),
+      groups: groups.filter((g) => live(g.id)),
+      rates: values.filter((x) => live(x.group_id)),
+      brandRaw: brandRaw.filter((x) => live(x.group_id)),
     };
   });
 
@@ -537,7 +542,41 @@ export const deleteGroup = createServerFn({ method: "POST" })
 
 export const listCategories = createServerFn({ method: "GET" })
   .middleware([authed])
-  .handler(async () => (await getDb()).select().from(categories).orderBy(asc(categories.sort)));
+  .handler(async () => {
+    const db = await getDb();
+    const [groups, cats] = await Promise.all([
+      db.select().from(product_groups).orderBy(asc(product_groups.sort)),
+      db.select().from(categories).orderBy(asc(categories.sort)),
+    ]);
+    return { groups, categories: cats };
+  });
+
+// Missing rate groups + zeroed rate rows for a subcategory's grades (existing rows are left alone).
+async function ensureRateRows(
+  db: Awaited<ReturnType<typeof getDb>>,
+  id: string,
+  label: string,
+  grades: string[],
+) {
+  const [profiles, presets] = await Promise.all([
+    db.select({ id: rate_profiles.id }).from(rate_profiles),
+    db.select({ id: rate_presets.id }).from(rate_presets),
+  ]);
+  const groupRows = grades.length
+    ? grades.map((g, i) => ({ id: `${id}:${g}`, name: `${label} ${g.replace(/^PE/, "PE ")}`, sort: 100 + i }))
+    : [{ id, name: label, sort: 100 }];
+  const rows = rateRowsFor(
+    id,
+    grades,
+    profiles.map((p) => p.id),
+    presets.map((p) => p.id),
+  );
+  await db.batch([
+    db.insert(rate_groups).values(groupRows[0]!).onConflictDoNothing(),
+    ...groupRows.slice(1).map((g) => db.insert(rate_groups).values(g).onConflictDoNothing()),
+    ...rows.map((r) => db.insert(rates).values(r).onConflictDoNothing()),
+  ]);
+}
 
 export const saveCategory = createServerFn({ method: "POST" })
   .middleware([adminOnly])
@@ -548,51 +587,53 @@ export const saveCategory = createServerFn({ method: "POST" })
       unit,
       gst_rate: gst,
       spec_fields: opt,
+      parent_id: z.string().min(1),
+      grades: z.array(z.string().trim().min(1).max(20)).max(12).default([]),
+      price_method: z.enum(["weight_rate", "sprinkler_piece", "fixed"]),
+      weight_method: z.enum(["is4984", "matrix", "brand", "none"]),
+      drawing: z.enum(["pipe", "sprinkler", "fitting", "dwc", "none"]),
+      class_label: z.string().trim().max(20).default(""),
     }),
   )
   .handler(async ({ data }) => {
     const db = await getDb();
-    const { id, ...rest } = data;
+    const { id, grades: rawGrades, ...rest } = data;
+    const grades = [...new Set(rawGrades.map(normGrade).filter(Boolean))];
+    const row = { ...rest, grades: grades.join(",") };
     const all = await db.select().from(categories);
     if (id) {
-      await db.update(categories).set(rest).where(eq(categories.id, id));
-      // keep the pricing card's name in step unless another category shares it
-      const own = all.find((c) => c.id === id);
-      if (
-        own?.rate_group_id &&
-        all.filter((c) => c.rate_group_id === own.rate_group_id).length === 1
-      )
-        await db
-          .update(rate_groups)
-          .set({ name: rest.label })
-          .where(eq(rate_groups.id, own.rate_group_id));
+      const old = all.find((c) => c.id === id);
+      if (!old) throw new Error("Category not found");
+      const oldGrades = old.grades.split(",").filter(Boolean);
+      const used = await db
+        .select({ grade: products.grade })
+        .from(products)
+        .where(eq(products.category, id));
+      const blocked = removedGradesInUse(oldGrades, grades, used);
+      if (blocked.length)
+        throw new Error(`Grade ${blocked.join(", ")} still has products. Move or delete them first.`);
+      await db
+        .update(categories)
+        .set({ ...row, rate_group_id: grades.length ? null : id })
+        .where(eq(categories.id, id));
+      await ensureRateRows(db, id, rest.label, grades);
       return { id };
     }
-    // new category = category + its own rate group + a zeroed rate row for every profile x preset
+    // new subcategory = category + a rate group (and zeroed rates) per grade
     const slug =
       rest.label
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "") || "cat";
-    const groups = await db.select().from(rate_groups);
-    const suffix = (taken: boolean) => (taken ? `-${Date.now().toString(36)}` : "");
-    const newId = `${slug}${suffix(all.some((c) => c.id === slug))}`;
-    const groupId = `${slug.toUpperCase().slice(0, 14)}${suffix(groups.some((g) => g.id === slug.toUpperCase().slice(0, 14)))}`;
-    const [profiles, presets] = await Promise.all([
-      db.select({ id: rate_profiles.id }).from(rate_profiles),
-      db.select({ id: rate_presets.id }).from(rate_presets),
-    ]);
-    await db.batch([
-      db.insert(rate_groups).values({ id: groupId, name: rest.label, sort: 100 }),
-      db
-        .insert(categories)
-        .values({ ...rest, id: newId, rate_group_id: groupId, sort: all.length + 1 }),
-      ...profiles.flatMap((p) =>
-        presets.map((s) =>
-          db.insert(rates).values({ profile_id: p.id, preset_id: s.id, group_id: groupId }),
-        ),
-      ),
-    ]);
+        .replace(/^-|-$/g, "")
+        .slice(0, 30) || "cat";
+    const newId = all.some((c) => c.id === slug) ? `${slug}-${Date.now().toString(36)}` : slug;
+    await db.insert(categories).values({
+      ...row,
+      id: newId,
+      rate_group_id: grades.length ? null : newId,
+      sort: all.length + 1,
+    });
+    await ensureRateRows(db, newId, rest.label, grades);
     return { id: newId };
   });
 
@@ -607,27 +648,59 @@ export const deleteCategory = createServerFn({ method: "POST" })
       .where(eq(products.category, data.id));
     if (used && used.n > 0)
       throw new Error(`${used.n} products use this category. Move or delete them first.`);
-    const [cat] = await db.select().from(categories).where(eq(categories.id, data.id));
-    await db.delete(categories).where(eq(categories.id, data.id));
-    // drop its pricing card too, unless another category or a product still uses it
-    const g = cat?.rate_group_id;
-    if (g) {
-      const [other] = await db
-        .select({ n: sql<number>`count(*)` })
-        .from(categories)
-        .where(eq(categories.rate_group_id, g));
-      const [prod] = await db
-        .select({ n: sql<number>`count(*)` })
-        .from(products)
-        .where(eq(products.rate_group_id, g));
-      if (!other?.n && !prod?.n)
-        await db.batch([
-          db.delete(rates).where(eq(rates.group_id, g)),
-          db.delete(rate_groups).where(eq(rate_groups.id, g)),
-        ]);
-    }
+    await db.batch([
+      db.delete(categories).where(eq(categories.id, data.id)),
+      db.delete(weight_matrix).where(eq(weight_matrix.category_id, data.id)),
+      // its pricing cards: "<id>" and "<id>:<grade>"
+      db.delete(rates).where(sql`${rates.group_id} = ${data.id} or ${rates.group_id} like ${data.id + ":%"}`),
+      db
+        .delete(rate_groups)
+        .where(sql`${rate_groups.id} = ${data.id} or ${rate_groups.id} like ${data.id + ":%"}`),
+    ]);
     return { ok: true };
   });
+
+export const saveProductGroup = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(z.object({ id: z.string().optional(), label: text.min(1) }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    if (data.id) {
+      await db.update(product_groups).set({ label: data.label }).where(eq(product_groups.id, data.id));
+      return { id: data.id };
+    }
+    const all = await db.select().from(product_groups);
+    const slug =
+      data.label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 30) || "group";
+    const id = all.some((g) => g.id === slug) ? `${slug}-${Date.now().toString(36)}` : slug;
+    await db.insert(product_groups).values({ id, label: data.label, sort: all.length + 1 });
+    return { id };
+  });
+
+export const deleteProductGroup = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const [used] = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(categories)
+      .where(eq(categories.parent_id, data.id));
+    if (used && used.n > 0)
+      throw new Error(`${used.n} subcategories are in this group. Move or delete them first.`);
+    await db.delete(product_groups).where(eq(product_groups.id, data.id));
+    return { ok: true };
+  });
+
+// Rate group of a product, worked out from its category's grades (the client's value is ignored).
+async function groupOf(db: Awaited<ReturnType<typeof getDb>>, category: string, grade: string | null | undefined) {
+  const [c] = await db.select({ grades: categories.grades }).from(categories).where(eq(categories.id, category));
+  return groupIdFrom(category, grade ?? null, (c?.grades ?? "").split(",").filter(Boolean));
+}
 
 export const listProducts = createServerFn({ method: "GET" })
   .middleware([authed])
@@ -645,7 +718,7 @@ export const saveProduct = createServerFn({ method: "POST" })
     z.object({
       id: z.string().optional(),
       category,
-      rate_group_id: z.string().min(1),
+      rate_group_id: z.string().default(""), // ignored: derived from category + grade
       name: text.min(1),
       grade: opt,
       roll: opt,
@@ -660,13 +733,18 @@ export const saveProduct = createServerFn({ method: "POST" })
       brand_id: z.string().nullable().optional(),
       length_m: z.number().positive().max(100).nullable().optional(),
       specs: opt,
+      base_price: money.nullable().optional(),
       active: z.boolean().default(true),
     }),
   )
   .handler(async ({ data }) => {
     const db = await getDb();
     const { id, active, ...rest } = data;
-    const row = { ...rest, active: active ? 1 : 0 };
+    const row = {
+      ...rest,
+      rate_group_id: await groupOf(db, rest.category, rest.grade),
+      active: active ? 1 : 0,
+    };
     if (id) {
       await db.update(products).set(row).where(eq(products.id, id));
       return { id };
@@ -681,7 +759,7 @@ export const saveProduct = createServerFn({ method: "POST" })
 const importRow = z.object({
   id: z.string().optional(),
   category,
-  rate_group_id: z.string().min(1),
+  rate_group_id: z.string().default(""), // ignored: derived from category + grade
   name: text.min(1),
   grade: opt,
   roll: opt,
@@ -700,14 +778,15 @@ export const importProducts = createServerFn({ method: "POST" })
   .validator(z.object({ rows: z.array(importRow).min(1).max(2000) }))
   .handler(async ({ data }) => {
     const db = await getDb();
-    const groups = new Set(
-      (await db.select({ id: rate_groups.id }).from(rate_groups)).map((g) => g.id),
+    // the rate group always follows the row's category + grade, whatever the file says
+    const cats = new Map(
+      (await db.select().from(categories)).map((c) => [c.id, c.grades.split(",").filter(Boolean)]),
     );
-    const bad = data.rows.find((r) => !groups.has(r.rate_group_id));
-    if (bad)
-      throw new Error(
-        `Unknown rate group "${bad.rate_group_id}" for ${bad.name}. Add it under Pricing first.`,
-      );
+    const badCat = data.rows.find((r) => !cats.has(r.category));
+    if (badCat)
+      throw new Error(`Unknown category "${badCat.category}" for ${badCat.name}. Add it first.`);
+    for (const r of data.rows)
+      r.rate_group_id = groupIdFrom(r.category, r.grade ?? null, cats.get(r.category)!);
     const existing = new Set(
       (await db.select({ id: products.id }).from(products)).map((p) => p.id),
     );

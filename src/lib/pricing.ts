@@ -5,14 +5,13 @@ import {
   type PriceMethod,
   type Rate,
 } from "./quote";
+import { groupIdFrom } from "./category-rules";
 
 // Rate groups are "<category>:<grade>" (pipe:PE80, plb:PE63) for graded categories, else the category id.
 // Each category's price method (weight × ₹/kg, sprinkler per piece, fixed base price) decides the formula,
 // so no code needs to know group ids by name.
-export function groupIdFor(category: string, grade: string | null): string {
-  const g = grade?.trim().toUpperCase().replace(/\s+/g, "") ?? "";
-  return g && categoryDefaults(category).grades.includes(g) ? `${category}:${g}` : category;
-}
+export const groupIdFor = (category: string, grade: string | null): string =>
+  groupIdFrom(category, grade, categoryDefaults(category).grades);
 
 // Ids used before the catalog tree (migration 0023 keeps them as a safety net).
 const LEGACY: Record<string, string> = {

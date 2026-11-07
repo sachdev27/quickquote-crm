@@ -9,6 +9,6 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function Shell() {
-  registerCategories(Route.useLoaderData()); // runs on server and client render before children read labels
+  registerCategories(Route.useLoaderData().categories); // runs on server and client render before children read labels
   return <Outlet />;
 }
