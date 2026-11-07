@@ -33,7 +33,13 @@ import {
   product_groups,
   weight_matrix,
 } from "./schema";
-import { groupIdFrom, normGrade, rateRowsFor, removedGradesInUse } from "@/lib/category-rules";
+import {
+  groupIdFrom,
+  normGrade,
+  rateRowsFor,
+  removedGradesInUse,
+  resolveGrade,
+} from "@/lib/category-rules";
 import { planMatrixSync } from "@/lib/matrix-sync";
 
 const LEGACY_GROUPS = ["PE63", "PE80", "PE100", "SPRINKLER", "FITTING", "PLB"];
@@ -625,6 +631,24 @@ export const saveCategory = createServerFn({ method: "POST" })
         .set({ ...row, rate_group_id: grades.length ? null : id })
         .where(eq(categories.id, id));
       await ensureRateRows(db, id, rest.label, grades);
+      // grades changed: move the subcategory's products onto the matching rate groups
+      const prods = await db
+        .select({ id: products.id, grade: products.grade, rate_group_id: products.rate_group_id })
+        .from(products)
+        .where(eq(products.category, id));
+      const moves = prods
+        .map((p) => {
+          const g = resolveGrade(p.grade, grades);
+          return { id: p.id, grade: g, rate_group_id: groupIdFrom(id, g, grades), old: p };
+        })
+        .filter((m) => m.rate_group_id !== m.old.rate_group_id || m.grade !== m.old.grade);
+      const [first, ...more] = moves.map((m) =>
+        db
+          .update(products)
+          .set({ grade: m.grade, rate_group_id: m.rate_group_id })
+          .where(eq(products.id, m.id)),
+      );
+      if (first) await db.batch([first, ...more]);
       return { id };
     }
     // new subcategory = category + a rate group (and zeroed rates) per grade
@@ -710,7 +734,8 @@ export const deleteProductGroup = createServerFn({ method: "POST" })
   });
 
 // Rate group of a product, worked out from its category's grades (the client's value is ignored).
-async function groupOf(
+// Grade + rate group a product is saved with: graded subcategories always get one of their grades.
+async function gradeAndGroup(
   db: Awaited<ReturnType<typeof getDb>>,
   category: string,
   grade: string | null | undefined,
@@ -719,7 +744,10 @@ async function groupOf(
     .select({ grades: categories.grades })
     .from(categories)
     .where(eq(categories.id, category));
-  return groupIdFrom(category, grade ?? null, (c?.grades ?? "").split(",").filter(Boolean));
+  if (!c) throw new Error(`Unknown category "${category}"`);
+  const grades = c.grades.split(",").filter(Boolean);
+  const g = resolveGrade(grade, grades);
+  return { grade: g, rate_group_id: groupIdFrom(category, g, grades) };
 }
 
 // Weight matrix (size x class → kg/m) of a subcategory whose weight comes from a table (DWC, ...).
@@ -830,7 +858,7 @@ export const saveProduct = createServerFn({ method: "POST" })
     const { id, active, ...rest } = data;
     const row = {
       ...rest,
-      rate_group_id: await groupOf(db, rest.category, rest.grade),
+      ...(await gradeAndGroup(db, rest.category, rest.grade)),
       active: active ? 1 : 0,
     };
     if (id) {
@@ -873,8 +901,11 @@ export const importProducts = createServerFn({ method: "POST" })
     const badCat = data.rows.find((r) => !cats.has(r.category));
     if (badCat)
       throw new Error(`Unknown category "${badCat.category}" for ${badCat.name}. Add it first.`);
-    for (const r of data.rows)
-      r.rate_group_id = groupIdFrom(r.category, r.grade ?? null, cats.get(r.category)!);
+    for (const r of data.rows) {
+      const grades = cats.get(r.category)!;
+      r.grade = resolveGrade(r.grade, grades);
+      r.rate_group_id = groupIdFrom(r.category, r.grade, grades);
+    }
     const existing = new Set(
       (await db.select({ id: products.id }).from(products)).map((p) => p.id),
     );

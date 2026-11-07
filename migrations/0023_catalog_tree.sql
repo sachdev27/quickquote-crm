@@ -70,13 +70,21 @@ insert or ignore into rate_groups (id, name, sort) values
   ('dwc:PE100', 'DWC Pipe PE 100', 41),
   ('fitting', 'Fittings', 50);
 
--- 6. copy rates (and brand raw prices) from the old groups
+-- 6. copy rates (and brand raw prices) from the old groups. Subcategories the owner added (one own group each,
+-- e.g. TAPE for "tape") become ungraded: their group is renamed to the category id, rates copied across.
+insert or ignore into rate_groups (id, name, sort)
+  select id, label, 60 from categories where grades = '' and id <> 'fitting';
+
 create table _group_map (old text, new text);
 insert into _group_map values
   ('PE63', 'pipe:PE63'), ('PE80', 'pipe:PE80'), ('PE100', 'pipe:PE100'),
   ('SPRINKLER', 'sprinkler:PE63'), ('SPRINKLER', 'sprinkler:PE80'),
   ('PLB', 'plb:PE63'), ('PLB', 'plb:PE80'), ('PLB', 'plb:PE100'),
   ('FITTING', 'fitting');
+insert into _group_map (old, new)
+  select rate_group_id, id from categories
+  where grades = '' and rate_group_id is not null and rate_group_id <> id
+    and rate_group_id not in ('PE63', 'PE80', 'PE100', 'SPRINKLER', 'FITTING', 'PLB');
 
 insert or ignore into rates (profile_id, preset_id, group_id, raw_kg, raw_kg_non_isi, production_kg,
   transport_kg, margin, margin_is_pct)
@@ -88,15 +96,14 @@ insert or ignore into brand_raw (profile_id, brand_id, group_id, raw_kg, raw_kg_
   select b.profile_id, b.brand_id, m.new, b.raw_kg, b.raw_kg_non_isi
   from brand_raw b join _group_map m on m.old = b.group_id;
 
--- groups with no source rows (DWC, fittings) get a zeroed row for every profile x preset;
+-- groups with no source rows (DWC, fittings, new ungraded ones) get a zeroed row for every profile x preset;
 -- fittings: margin 0 % so the base price passes through unchanged
 insert or ignore into rates (profile_id, preset_id, group_id)
   select p.id, s.id, g.id from rate_profiles p, rate_presets s, rate_groups g
-  where g.id in ('dwc:PE80', 'dwc:PE100', 'fitting', 'plb:PE63', 'plb:PE80', 'plb:PE100');
+  where g.id in ('dwc:PE80', 'dwc:PE100', 'fitting', 'plb:PE63', 'plb:PE80', 'plb:PE100')
+    or g.id in (select id from categories where grades = '');
 update rates set margin = 0, margin_is_pct = 1
   where group_id = 'fitting' and not exists (select 1 from rates o where o.group_id = 'FITTING');
-
-drop table _group_map;
 
 -- 7. existing sprinkler products become PE 63; each gets a PE 80 twin (originals keep their ids)
 update products set grade = 'PE63' where category = 'sprinkler' and coalesce(grade, '') = '';
@@ -108,16 +115,27 @@ insert into products (id, category, rate_group_id, name, grade, roll, size_mm, i
     and not exists (select 1 from products t where t.category = 'sprinkler' and t.grade = 'PE80'
       and t.name = products.name and coalesce(t.brand_id, '') = coalesce(products.brand_id, ''));
 
--- 8. every product points at its subcategory x grade group (ungraded or unknown grade → the category)
-update products set rate_group_id = coalesce(
-  (select products.category || ':' || upper(replace(products.grade, ' ', '')) from categories c
-    where c.id = products.category and products.grade is not null
-      and instr(',' || c.grades || ',', ',' || upper(replace(products.grade, ' ', '')) || ',') > 0),
-  products.category);
+-- 8. every product of a graded subcategory gets one of its grades: its own (tidied, "pe 80" → PE80), else the
+-- one its old group implies (PE80 → PE80, PLB/SPRINKLER → PE63), else the subcategory's first grade.
+update products set grade = upper(replace(grade, ' ', ''))
+  where category in (select id from categories where grades <> '') and grade is not null;
+update products set grade = coalesce(
+    (select substr(m.new, length(products.category) + 2) from _group_map m
+      where m.old = products.rate_group_id and m.new like products.category || ':%'
+      order by m.rowid limit 1),
+    (select substr(c.grades, 1, instr(c.grades || ',', ',') - 1) from categories c
+      where c.id = products.category))
+  where category in (select id from categories where grades <> '')
+    and (grade is null or instr(',' || (select grades from categories c where c.id = products.category) || ',',
+      ',' || grade || ',') = 0);
+
+-- ... and points at its subcategory x grade group; ungraded subcategories use their own id
+update products set rate_group_id = case
+  when (select grades from categories c where c.id = products.category) <> ''
+    then category || ':' || grade
+  else category end;
+
+drop table _group_map;
 
 -- 9. categories no longer carry a single rate group, except ungraded ones
 update categories set rate_group_id = case when grades = '' then id else null end;
-insert or ignore into rate_groups (id, name, sort)
-  select id, label, 60 from categories where grades = '' and id <> 'fitting';
-insert or ignore into rates (profile_id, preset_id, group_id)
-  select p.id, s.id, c.id from rate_profiles p, rate_presets s, categories c where c.grades = '';

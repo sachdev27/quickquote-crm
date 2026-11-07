@@ -3,6 +3,14 @@
 export const normGrade = (g: string | null | undefined) =>
   (g ?? "").trim().toUpperCase().replace(/\s+/g, "");
 
+// Grade a product is saved with: a graded subcategory always gets one of its grades (the first when the given
+// one is missing or unknown); ungraded ones keep the column as is (fittings keep their family there).
+export function resolveGrade(grade: string | null | undefined, grades: string[]): string | null {
+  if (!grades.length) return grade ?? null;
+  const g = normGrade(grade);
+  return grades.includes(g) ? g : grades[0]!;
+}
+
 // Rate group of a product: "<category>:<grade>" when the grade is one of the category's grades, else the category.
 export function groupIdFrom(category: string, grade: string | null, grades: string[]): string {
   const g = normGrade(grade);

@@ -28,7 +28,7 @@ export interface NewProduct {
   category: string;
   rate_group_id: string;
   name: string;
-  grade: string;
+  grade: string | null;
   size_mm: number;
   pn: string;
   unit: "m";
@@ -44,7 +44,9 @@ export interface SyncPlan {
 const normClass = (s: string | null | undefined) => (s ?? "").toUpperCase().replace(/\s+/g, "");
 const key = (category: string, grade: string, size: number, cls: string) =>
   `${category}|${grade}|${Math.round(size)}|${normClass(cls)}`;
-const gradesOf = (c: MatrixCell, grades: string[]) => (c.grade ? [c.grade] : grades);
+// grades a cell makes products for; an ungraded subcategory makes one product (grade null)
+const gradesOf = (c: MatrixCell, grades: string[]): (string | null)[] =>
+  c.grade ? [c.grade] : grades.length ? grades : [null];
 
 export function planMatrixSync(
   cells: MatrixCell[],
@@ -66,13 +68,13 @@ export function planMatrixSync(
     const prev = prevById.get(c.id);
     for (const g of gradesOf(c, grades)) {
       const found =
-        (prev && byKey.get(key(prev.category_id, g, prev.size_mm, prev.class))) ??
-        byKey.get(key(c.category_id, g, c.size_mm, c.class));
+        (prev && byKey.get(key(prev.category_id, g ?? "", prev.size_mm, prev.class))) ??
+        byKey.get(key(c.category_id, g ?? "", c.size_mm, c.class));
       if (!(c.kg_per_m > 0)) {
         off(found);
         continue;
       }
-      const name = `${label} ${g} ${c.size_label} ${c.class}`.replace(/\s+/g, " ").trim();
+      const name = `${label} ${g ?? ""} ${c.size_label} ${c.class}`.replace(/\s+/g, " ").trim();
       const size = Math.round(c.size_mm);
       if (found)
         plan.update.push({
@@ -86,7 +88,7 @@ export function planMatrixSync(
       else
         plan.insert.push({
           category: c.category_id,
-          rate_group_id: `${c.category_id}:${g}`,
+          rate_group_id: g ? `${c.category_id}:${g}` : c.category_id,
           name,
           grade: g,
           size_mm: size,
@@ -96,11 +98,14 @@ export function planMatrixSync(
         });
     }
   }
-  // cells removed from the matrix
+  // cells removed from the matrix (unless a live cell took over their product)
   const kept = new Set(cells.map((c) => c.id));
+  const live = new Set(plan.update.map((u) => u.id));
   for (const prev of prevCells)
     if (!kept.has(prev.id))
-      for (const g of gradesOf(prev, grades))
-        off(byKey.get(key(prev.category_id, g, prev.size_mm, prev.class)));
+      for (const g of gradesOf(prev, grades)) {
+        const p = byKey.get(key(prev.category_id, g ?? "", prev.size_mm, prev.class));
+        if (p && !live.has(p.id)) off(p);
+      }
   return plan;
 }

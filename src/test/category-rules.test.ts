@@ -22,3 +22,20 @@ describe("removing grades", () => {
     expect(removedGradesInUse(["PE63"], [], [{ grade: "PE80" }])).toEqual([]);
   });
 });
+
+describe("grade of a product", () => {
+  it("keeps a valid grade, normalised", async () => {
+    const { resolveGrade } = await import("@/lib/category-rules");
+    expect(resolveGrade("pe 80", ["PE63", "PE80"])).toBe("PE80");
+  });
+  it("graded subcategory without a valid grade gets its first grade", async () => {
+    const { resolveGrade } = await import("@/lib/category-rules");
+    expect(resolveGrade(null, ["PE63", "PE80"])).toBe("PE63");
+    expect(resolveGrade("PE999", ["PE80", "PE100"])).toBe("PE80");
+  });
+  it("ungraded subcategory keeps whatever is there (fitting families)", async () => {
+    const { resolveGrade } = await import("@/lib/category-rules");
+    expect(resolveGrade("Electrofusion", [])).toBe("Electrofusion");
+    expect(resolveGrade(null, [])).toBeNull();
+  });
+});

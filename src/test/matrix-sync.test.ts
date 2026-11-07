@@ -96,3 +96,22 @@ describe("weight matrix → products", () => {
     expect(plan.update[0]?.id).toBe("hand");
   });
 });
+
+describe("weight matrix edge cases", () => {
+  it("a row removed and added back keeps its product active", () => {
+    const plan = planMatrixSync(
+      [cell({ id: "new", grade: "PE80" })],
+      [cell({ id: "old", grade: "PE80" })],
+      GRADES,
+      [prod()],
+      "DWC Pipe",
+    );
+    expect(plan.update.map((u) => u.id)).toEqual(["p1"]);
+    expect(plan.deactivate).toEqual([]);
+  });
+  it("an ungraded subcategory gets one product per cell on its own rate group", () => {
+    const plan = planMatrixSync([cell({ category_id: "acc" })], [], [], [], "Accessory");
+    expect(plan.insert).toHaveLength(1);
+    expect(plan.insert[0]).toMatchObject({ rate_group_id: "acc", grade: null });
+  });
+});
