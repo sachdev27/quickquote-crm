@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { rateKgFor } from "@/lib/pricing";
 import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, Field, inputCls } from "@/components/qq";
 import { Switch } from "@/components/ui/switch";
@@ -61,7 +62,6 @@ import {
   fmtMoney,
   fmtNum,
   ratePerKg,
-  rateKgFor,
   sprinklerPrice,
   SPRINKLER_GROUP,
   withBrandRaw,
