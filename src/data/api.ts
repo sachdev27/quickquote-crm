@@ -357,7 +357,8 @@ export const bulkUpdateRates = createServerFn({ method: "POST" })
         [data.field]: expr,
         ...(data.field === "margin" && data.marginType
           ? {
-              margin_is_pct: sql`case when ${rates.group_id} = 'SPRINKLER' then ${rates.margin_is_pct} else ${data.marginType === "pct" ? 1 : 0} end`,
+              // piece-priced groups (sprinkler) keep their flat ₹/piece margin
+              margin_is_pct: sql`case when exists (select 1 from categories c where c.price_method = 'sprinkler_piece' and (${rates.group_id} = c.id or ${rates.group_id} like c.id || ':%')) then ${rates.margin_is_pct} else ${data.marginType === "pct" ? 1 : 0} end`,
             }
           : {}),
       })
@@ -563,7 +564,11 @@ async function ensureRateRows(
     db.select({ id: rate_presets.id }).from(rate_presets),
   ]);
   const groupRows = grades.length
-    ? grades.map((g, i) => ({ id: `${id}:${g}`, name: `${label} ${g.replace(/^PE/, "PE ")}`, sort: 100 + i }))
+    ? grades.map((g, i) => ({
+        id: `${id}:${g}`,
+        name: `${label} ${g.replace(/^PE/, "PE ")}`,
+        sort: 100 + i,
+      }))
     : [{ id, name: label, sort: 100 }];
   const rows = rateRowsFor(
     id,
@@ -611,7 +616,9 @@ export const saveCategory = createServerFn({ method: "POST" })
         .where(eq(products.category, id));
       const blocked = removedGradesInUse(oldGrades, grades, used);
       if (blocked.length)
-        throw new Error(`Grade ${blocked.join(", ")} still has products. Move or delete them first.`);
+        throw new Error(
+          `Grade ${blocked.join(", ")} still has products. Move or delete them first.`,
+        );
       await db
         .update(categories)
         .set({ ...row, rate_group_id: grades.length ? null : id })
@@ -652,7 +659,9 @@ export const deleteCategory = createServerFn({ method: "POST" })
       db.delete(categories).where(eq(categories.id, data.id)),
       db.delete(weight_matrix).where(eq(weight_matrix.category_id, data.id)),
       // its pricing cards: "<id>" and "<id>:<grade>"
-      db.delete(rates).where(sql`${rates.group_id} = ${data.id} or ${rates.group_id} like ${data.id + ":%"}`),
+      db
+        .delete(rates)
+        .where(sql`${rates.group_id} = ${data.id} or ${rates.group_id} like ${data.id + ":%"}`),
       db
         .delete(rate_groups)
         .where(sql`${rate_groups.id} = ${data.id} or ${rate_groups.id} like ${data.id + ":%"}`),
@@ -666,7 +675,10 @@ export const saveProductGroup = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const db = await getDb();
     if (data.id) {
-      await db.update(product_groups).set({ label: data.label }).where(eq(product_groups.id, data.id));
+      await db
+        .update(product_groups)
+        .set({ label: data.label })
+        .where(eq(product_groups.id, data.id));
       return { id: data.id };
     }
     const all = await db.select().from(product_groups);
@@ -697,8 +709,15 @@ export const deleteProductGroup = createServerFn({ method: "POST" })
   });
 
 // Rate group of a product, worked out from its category's grades (the client's value is ignored).
-async function groupOf(db: Awaited<ReturnType<typeof getDb>>, category: string, grade: string | null | undefined) {
-  const [c] = await db.select({ grades: categories.grades }).from(categories).where(eq(categories.id, category));
+async function groupOf(
+  db: Awaited<ReturnType<typeof getDb>>,
+  category: string,
+  grade: string | null | undefined,
+) {
+  const [c] = await db
+    .select({ grades: categories.grades })
+    .from(categories)
+    .where(eq(categories.id, category));
   return groupIdFrom(category, grade ?? null, (c?.grades ?? "").split(",").filter(Boolean));
 }
 

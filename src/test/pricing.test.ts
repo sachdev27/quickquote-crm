@@ -78,7 +78,9 @@ describe("pricing by method", () => {
   });
   it("unit price picks the method from the group", () => {
     const r20 = { ...r, margin: 20, margin_is_pct: 1 };
-    expect(unitPriceFor({ rate_group_id: "fitting", weight_kg: 0, base_price: 100 }, r20)).toBe(120);
+    expect(unitPriceFor({ rate_group_id: "fitting", weight_kg: 0, base_price: 100 }, r20)).toBe(
+      120,
+    );
     expect(
       unitPriceFor({ rate_group_id: "pipe:PE80", weight_kg: 0.5, base_price: null }, r),
     ).toBeCloseTo(0.5 * ratePerKg(r));

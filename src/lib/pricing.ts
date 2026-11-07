@@ -1,10 +1,4 @@
-import {
-  categoryDefaults,
-  ratePerKg,
-  sprinklerRateKg,
-  type PriceMethod,
-  type Rate,
-} from "./quote";
+import { categoryDefaults, ratePerKg, sprinklerRateKg, type PriceMethod, type Rate } from "./quote";
 import { groupIdFrom } from "./category-rules";
 
 // Rate groups are "<category>:<grade>" (pipe:PE80, plb:PE63) for graded categories, else the category id.

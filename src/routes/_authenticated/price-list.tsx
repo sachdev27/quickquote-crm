@@ -8,15 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { listBrands, listPricing, listProducts } from "@/data/api";
 import { LAST_BRAND, LAST_PRESET } from "@/lib/catalog";
-import {
-  CATEGORY_LABELS,
-  UNIT_LABELS,
-  fmtNum,
-  ratePerKg,
-  sprinklerPrice,
-  withBrandRaw,
-  type Unit,
-} from "@/lib/quote";
+import { CATEGORY_LABELS, UNIT_LABELS, fmtNum, withBrandRaw, type Unit } from "@/lib/quote";
+import { unitPriceFor } from "@/lib/pricing";
 import { recall } from "@/lib/utils";
 import { pnNumber } from "@/lib/weights";
 
@@ -81,11 +74,7 @@ function PriceList() {
   const all = prods.data ?? [];
   const price = (p: (typeof all)[number]) => {
     const r = rateRow(p.rate_group_id);
-    const base = !r
-      ? 0
-      : p.category === "sprinkler"
-        ? sprinklerPrice(r, p.weight_kg, nonIsi)
-        : ratePerKg(r, nonIsi) * p.weight_kg;
+    const base = unitPriceFor(p, r ?? undefined, nonIsi);
     return base * (withGst ? 1 + p.gst_rate / 100 : 1);
   };
   const pipes = all.filter((p) => p.category === "pipe");

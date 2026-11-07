@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { rateKgFor } from "@/lib/pricing";
+import { groupIdFor, isPieceGroup, rateKgFor } from "@/lib/pricing";
 import { PageShell } from "@/components/bottom-nav";
 import { Card, Chips, Field, inputCls } from "@/components/qq";
 import { Switch } from "@/components/ui/switch";
@@ -63,7 +63,6 @@ import {
   fmtNum,
   ratePerKg,
   sprinklerPrice,
-  SPRINKLER_GROUP,
   withBrandRaw,
   type Category,
   type Rate,
@@ -257,9 +256,9 @@ function ProductsAdmin() {
   };
 
   // Sprinkler pipe is priced per piece: raw × weight + production + coupler + margin (flat ₹ each).
-  const isSprinkler = card?.group.toUpperCase() === SPRINKLER_GROUP;
+  const isSprinkler = !!card && isPieceGroup(card.group);
   const sample = sprinklerSample;
-  const sprinklerRaw = brandRawOf(SPRINKLER_GROUP)?.raw_kg ?? n(card?.raw ?? "");
+  const sprinklerRaw = (card && brandRawOf(card.group)?.raw_kg) ?? n(card?.raw ?? "");
   async function submitCard(e: React.FormEvent) {
     e.preventDefault();
     if (!card) return;
@@ -371,7 +370,6 @@ function ProductsAdmin() {
     e?.preventDefault();
     const p = prod;
     if (!p?.name?.trim()) return void toast.error("Name is required");
-    if (!p.rate_group_id) return void toast.error("Pick a rate group");
     try {
       await saveProduct({ data: productPayload(p, active) });
       await qc.invalidateQueries({ queryKey: ["products"] });
@@ -421,10 +419,10 @@ function ProductsAdmin() {
           brands={brands.data ?? []}
           basis={presetName(presetId)}
           rateOf={rateOf}
-          sprinklerRate={(bid) => {
-            const r = rateRow(presetId, SPRINKLER_GROUP);
+          sprinklerRate={(bid, group = "sprinkler:PE63") => {
+            const r = rateRow(presetId, group);
             const b = bid
-              ? scoped?.brandRaw.find((x) => x.brand_id === bid && x.group_id === SPRINKLER_GROUP)
+              ? scoped?.brandRaw.find((x) => x.brand_id === bid && x.group_id === group)
               : undefined;
             return r && withBrandRaw(r, b);
           }}
@@ -638,7 +636,7 @@ function ProductsAdmin() {
             onAdd={() =>
               setProd({
                 category: "fitting",
-                rate_group_id: "FITTING",
+                rate_group_id: "fitting",
                 unit: "pc",
                 gst_rate: 18,
                 hsn: "3917 40 00",
@@ -1204,7 +1202,7 @@ function PricingGrid({
                             <span className="flex items-start justify-end gap-3">
                               <span>
                                 <span className="block text-base font-bold lg:text-sm">
-                                  {g.id === SPRINKLER_GROUP
+                                  {isPieceGroup(g.id)
                                     ? sprinklerSample
                                       ? `${fmtMoney(sprinklerPrice(r, sprinklerSample.weight_kg))}/pc`
                                       : `+${fmtMoney(r.production_kg + r.transport_kg + r.margin)}/pc`
@@ -1213,13 +1211,13 @@ function PricingGrid({
                                 <span
                                   className={`block text-[10px] ${r.brandApplied ? "font-semibold text-primary" : "text-muted-foreground"}`}
                                 >
-                                  {g.id === SPRINKLER_GROUP
+                                  {isPieceGroup(g.id)
                                     ? `${sprinklerSample ? `${fmtNum(r.raw_kg)} × ${fmtNum(sprinklerSample.weight_kg)} kg` : "raw × wt"} + ${fmtNum(r.production_kg)} + ${fmtNum(r.transport_kg)} + ${fmtNum(r.margin)}`
                                     : parts(r)}
                                   {r.brandApplied && " · brand raw"}
                                 </span>
                               </span>
-                              {r.raw_kg_non_isi != null && g.id !== SPRINKLER_GROUP && (
+                              {r.raw_kg_non_isi != null && !isPieceGroup(g.id) && (
                                 <>
                                   <span
                                     className="self-stretch border-l border-border"
@@ -1304,9 +1302,9 @@ function BulkSheet({
   // Transport never touches sprinkler (that column is its coupler); Coupler touches only sprinkler.
   const gradeItems =
     field === "coupler"
-      ? pricing.groups.filter((g) => g.id === SPRINKLER_GROUP)
+      ? pricing.groups.filter((g) => isPieceGroup(g.id))
       : field === "transport_kg"
-        ? pricing.groups.filter((g) => g.id !== SPRINKLER_GROUP)
+        ? pricing.groups.filter((g) => !isPieceGroup(g.id))
         : pricing.groups;
   const chosenGroups = groups.filter((g) => gradeItems.some((x) => x.id === g));
   const unit =
@@ -1426,12 +1424,11 @@ function BulkSheet({
               className={inputCls}
             />
           </Field>
-          {(field === "production_kg" || field === "margin") &&
-            chosenGroups.includes(SPRINKLER_GROUP) && (
-              <p className="-mt-2 text-xs text-muted-foreground">
-                For Sprinkler pipe this value is ₹ per piece.
-              </p>
-            )}
+          {(field === "production_kg" || field === "margin") && chosenGroups.some(isPieceGroup) && (
+            <p className="-mt-2 text-xs text-muted-foreground">
+              For Sprinkler pipe this value is ₹ per piece.
+            </p>
+          )}
           {(
             [
               ["Presets", pricing.presets, presets, setPresets],
@@ -1585,7 +1582,7 @@ function WeightChart({
       (it) => !rows.some((p) => p.size_mm === it.size && p.pn === normalizePn(it.pn)),
     );
     if (!fresh.length) return void toast.error("Those already exist");
-    const groupId = pipes.find((p) => p.grade === grade)?.rate_group_id ?? grade;
+    const groupId = groupIdFor("pipe", grade);
     setBusy(true);
     try {
       for (const it of fresh) {
@@ -2443,6 +2440,7 @@ function SprinklerCard({
   const [form, setForm] = useState<null | {
     id?: string;
     brand: string;
+    grade: string;
     size: string;
     len: string;
     pn: string;
@@ -2471,7 +2469,7 @@ function SprinklerCard({
         data: {
           ...(form.id ? { id: form.id } : {}),
           category: "sprinkler",
-          rate_group_id: SPRINKLER_GROUP,
+          grade: form.grade,
           name: `Sprinkler Pipe ${size} mm × ${len} m`,
           size_mm: Math.round(size),
           length_m: len,
@@ -2511,7 +2509,8 @@ function SprinklerCard({
             <span className="min-w-0 truncate">
               <span className="font-medium">{brandName(p.brand_id)}</span>{" "}
               <span className="text-muted-foreground">
-                {p.size_mm} mm · {p.length_m ?? "?"} m{p.pn ? ` · ${p.pn}` : ""}
+                {p.size_mm} mm · {p.length_m ?? "?"} m{p.grade ? ` · ${p.grade}` : ""}
+                {p.pn ? ` · ${p.pn}` : ""}
               </span>
             </span>
             <span className="flex items-center gap-1">
@@ -2523,6 +2522,7 @@ function SprinklerCard({
                   setForm({
                     id: p.id,
                     brand: p.brand_id ?? "",
+                    grade: p.grade ?? "PE63",
                     size: String(p.size_mm ?? ""),
                     len: String(p.length_m ?? ""),
                     pn: p.pn ?? "",
@@ -2583,6 +2583,19 @@ function SprinklerCard({
                 <option value="12" />
               </datalist>
             </Field>
+            <Field label="Grade">
+              <select
+                value={form.grade}
+                onChange={(e) => setForm({ ...form, grade: e.target.value })}
+                className={inputCls}
+              >
+                {categoryDefaults("sprinkler").grades.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="Pressure (PN)">
               <input
                 value={form.pn}
@@ -2614,7 +2627,14 @@ function SprinklerCard({
           variant="outline"
           className="h-11 rounded-xl"
           onClick={() =>
-            setForm({ brand: brands[0]?.id ?? "", size: "", len: "6", pn: "", weight: "" })
+            setForm({
+              brand: brands[0]?.id ?? "",
+              grade: "PE63",
+              size: "",
+              len: "6",
+              pn: "",
+              weight: "",
+            })
           }
         >
           <Plus className="mr-1 h-4 w-4" /> Sprinkler size
@@ -3396,7 +3416,6 @@ function parseProductCsv(text: string): { rows: ImportRow[]; errors: string[] } 
     if (!["m", "pc", "kg"].includes(unit))
       return void errors.push(`${line}: unit must be m, pc or kg`);
     if (!r.name) return void errors.push(`${line}: name is required`);
-    if (!r.rate_group_id) return void errors.push(`${line}: rate_group_id is required (e.g. PE63)`);
     if (!isFinite(weight) || weight < 0)
       return void errors.push(`${line}: weight_kg must be a number`);
     if (size != null && (!Number.isInteger(size) || size <= 0))
@@ -3406,7 +3425,7 @@ function parseProductCsv(text: string): { rows: ImportRow[]; errors: string[] } 
       category: category as ImportRow["category"],
       unit: unit as ImportRow["unit"],
       name: r.name,
-      rate_group_id: r.rate_group_id.toUpperCase(),
+      rate_group_id: "", // the server derives it from category + grade
       grade: r.grade || null,
       roll: r.roll || null,
       pn: r.pn ? normalizePn(r.pn) : null,

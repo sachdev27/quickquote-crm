@@ -32,7 +32,6 @@ import {
   type Category,
   type Rate,
   type Unit,
-  SPRINKLER_GROUP,
 } from "@/lib/quote";
 import { isSpec } from "@/lib/is4984";
 import { productQueryFilter } from "@/lib/product-search";

@@ -31,6 +31,7 @@ export const productPayload = (p: ProductForm, active = true) => ({
   brand_id: p.category === "sprinkler" ? (p.brand_id ?? null) : null,
   length_m: p.category === "sprinkler" ? (p.length_m ?? null) : null,
   specs: p.specs ?? null,
+  base_price: p.base_price ?? null,
   unit: (p.unit ?? "pc") as Unit,
   weight_kg: n(p.weight),
   gst_rate: p.gst_rate ?? 18,
