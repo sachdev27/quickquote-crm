@@ -8,6 +8,11 @@ export const CATEGORY_LABELS: Record<string, string> = {
   sprinkler: "Sprinkler",
   fitting: "Fitting",
 };
+// Parent groups of the catalog tree (HDPE, Fittings, ...), filled alongside the categories.
+export const PRODUCT_GROUPS: { id: string; label: string }[] = [];
+export function registerProductGroups(rows: { id: string; label: string }[]) {
+  PRODUCT_GROUPS.splice(0, PRODUCT_GROUPS.length, ...rows.map(({ id, label }) => ({ id, label })));
+}
 export type PriceMethod = "weight_rate" | "sprinkler_piece" | "fixed";
 export type WeightMethod = "is4984" | "matrix" | "brand" | "none";
 export type Drawing = "pipe" | "sprinkler" | "fitting" | "dwc" | "none";

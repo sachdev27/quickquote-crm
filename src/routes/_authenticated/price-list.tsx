@@ -8,7 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { listBrands, listPricing, listProducts } from "@/data/api";
 import { LAST_BRAND, LAST_PRESET } from "@/lib/catalog";
-import { CATEGORY_LABELS, UNIT_LABELS, fmtNum, withBrandRaw, type Unit } from "@/lib/quote";
+import {
+  CATEGORY_LABELS,
+  PRODUCT_GROUPS,
+  UNIT_LABELS,
+  categoryDefaults,
+  fmtNum,
+  withBrandRaw,
+  type Unit,
+} from "@/lib/quote";
 import { unitPriceFor } from "@/lib/pricing";
 import { recall } from "@/lib/utils";
 import { pnNumber } from "@/lib/weights";
@@ -77,31 +85,51 @@ function PriceList() {
     const base = unitPriceFor(p, r ?? undefined, nonIsi);
     return base * (withGst ? 1 + p.gst_rate / 100 : 1);
   };
-  const pipes = all.filter((p) => p.category === "pipe");
-  const tables = uniq(pipes.map((p) => `${p.grade}|${p.roll ?? "complete"}`)).map((k) => {
-    const [grade, roll] = k.split("|") as [string, string];
-    const rows = pipes.filter((p) => p.grade === grade && (p.roll ?? "complete") === roll);
-    return {
-      key: k,
-      grade,
-      roll,
-      rows,
-      sizes: uniq(rows.map((p) => p.size_mm ?? 0)).sort((a, b) => a - b),
-      pns: uniq(rows.map((p) => p.pn ?? "")).sort((a, b) => pnNumber(a) - pnNumber(b)),
-    };
-  });
-  // Fittings are bought in and priced on the quote; sprinkler weights belong to a brand.
-  const others = all.filter(
-    (p) =>
-      p.category === "sprinkler"
-        ? !p.brand_id || p.brand_id === brandId
-        : !["pipe", "fitting"].includes(p.category) && p.weight_kg > 0, // categories you added, e.g. PLB duct
-  );
+  // Size x class tables for subcategories whose weight comes from IS 4984 or a weight table (HDPE, PLB, DWC);
+  // a plain list for the rest. Sprinkler weights belong to a brand; fixed-price items print only with a base price.
+  const gridded = (c: string) => ["is4984", "matrix"].includes(categoryDefaults(c).weightMethod);
+  const tablesOf = (cat: string) => {
+    const items = all.filter((p) => p.category === cat);
+    const order = categoryDefaults(cat).grades;
+    const keys = uniq(items.map((p) => `${p.grade ?? ""}|${p.roll ?? "complete"}`)).sort(
+      (a, b) => order.indexOf(a.split("|")[0]!) - order.indexOf(b.split("|")[0]!),
+    );
+    return keys.map((k) => {
+      const [grade, roll] = k.split("|") as [string, string];
+      const rows = items.filter(
+        (p) => (p.grade ?? "") === grade && (p.roll ?? "complete") === roll,
+      );
+      return {
+        key: `${cat}|${k}`,
+        cat,
+        grade,
+        roll,
+        rows,
+        sizes: uniq(rows.map((p) => p.size_mm ?? 0)).sort((a, b) => a - b),
+        pns: uniq(rows.map((p) => p.pn ?? "")).sort((a, b) => pnNumber(a) - pnNumber(b)),
+      };
+    });
+  };
+  const listed = (p: (typeof all)[number]) =>
+    p.category === "sprinkler"
+      ? !p.brand_id || p.brand_id === brandId
+      : categoryDefaults(p.category).priceMethod === "fixed"
+        ? p.base_price != null
+        : p.weight_kg > 0;
+  const sections = (PRODUCT_GROUPS.length ? PRODUCT_GROUPS : [{ id: "", label: "" }])
+    .map((g) => {
+      const cats = Object.keys(CATEGORY_LABELS).filter(
+        (c) => (categoryDefaults(c).parent ?? "") === g.id || !PRODUCT_GROUPS.length,
+      );
+      return {
+        ...g,
+        tables: cats.filter(gridded).flatMap(tablesOf),
+        others: all.filter((p) => cats.includes(p.category) && !gridded(p.category) && listed(p)),
+      };
+    })
+    .filter((g) => g.tables.length || g.others.length);
   const gstRates = uniq(
-    all.map(
-      (p) =>
-        `${p.category === "pipe" ? "HDPE pipe" : p.category === "sprinkler" ? "Sprinkler pipe" : p.category === "fitting" ? "Fittings" : (CATEGORY_LABELS[p.category] ?? p.category)} ${p.gst_rate}%`,
-    ),
+    all.filter(listed).map((p) => `${CATEGORY_LABELS[p.category] ?? p.category} ${p.gst_rate}%`),
   );
 
   return (
@@ -155,7 +183,11 @@ function PriceList() {
             {brand?.tagline?.replace(/^by\s+/i, "") || brand?.name}
           </p>
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {brand?.name} · Manufacturers of HDPE & sprinkler pipes
+            {brand?.name} ·{" "}
+            {sections
+              .map((g) => g.label)
+              .filter(Boolean)
+              .join(" · ")}
           </p>
           {brand?.address && <p className="text-muted-foreground">{brand.address}</p>}
           {brand?.phone && <p className="text-muted-foreground">{brand.phone}</p>}
@@ -167,81 +199,101 @@ function PriceList() {
           <p className="font-semibold">W.E.F.: {wef.split("-").reverse().join("/")}</p>
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          HDPE pipe in ₹ per metre{withGst ? ", GST included" : ", GST extra"}.
+          Pipes in ₹ per metre{withGst ? ", GST included" : ", GST extra"}.
         </p>
 
-        <div className="grid gap-5 md:grid-cols-2 print:grid-cols-2">
-          {tables.map((t) => (
-            <table key={t.key} className="w-full border-collapse self-start tabular-nums text-xs">
-              <thead>
-                <tr>
-                  <th
-                    colSpan={2 + t.pns.length}
-                    className="border border-foreground/40 bg-secondary py-1 text-center font-bold"
-                  >
-                    GRADE {t.grade}
-                    {t.roll === "cut" ? " · CUT ROLL" : ""}
-                  </th>
-                </tr>
-                <tr>
-                  <th className="border border-foreground/40 px-1 py-1">SIZE</th>
-                  <th className="border border-foreground/40 px-1">
-                    {t.roll === "cut" ? "INCH" : "LENGTH"}
-                  </th>
-                  {t.pns.map((pn) => (
-                    <th key={pn} className="border border-foreground/40 px-1">
-                      {pn}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {t.sizes.map((size) => {
-                  const any = t.rows.find((p) => p.size_mm === size);
-                  return (
-                    <tr key={size}>
-                      <td className="border border-foreground/40 px-1 py-0.5">
-                        {size}MM{any?.inch ? ` (${any.inch})` : ""}
-                      </td>
-                      <td className="border border-foreground/40 px-1 text-center">
-                        {t.roll === "cut"
-                          ? (any?.inch ?? "")
-                          : any?.roll_lengths
-                            ? `${any.roll_lengths} m`
-                            : ""}
-                      </td>
-                      {t.pns.map((pn) => {
-                        const p = t.rows.find((x) => x.size_mm === size && x.pn === pn);
-                        return (
-                          <td key={pn} className="border border-foreground/40 px-1 text-right">
-                            {p ? fmtNum(price(p)) : "–"}
-                          </td>
-                        );
-                      })}
+        {sections.map((g) => (
+          <section key={g.id} className="mt-4 break-inside-avoid-page first:mt-0">
+            {sections.length > 1 && g.label && (
+              <h2 className="mb-2 text-sm font-bold uppercase tracking-wide">{g.label}</h2>
+            )}
+            <div className="grid gap-5 md:grid-cols-2 print:grid-cols-2">
+              {g.tables.map((t) => (
+                <table
+                  key={t.key}
+                  className="w-full border-collapse self-start tabular-nums text-xs"
+                >
+                  <thead>
+                    <tr>
+                      <th
+                        colSpan={2 + t.pns.length}
+                        className="border border-foreground/40 bg-secondary py-1 text-center font-bold"
+                      >
+                        {t.cat === "pipe"
+                          ? "GRADE"
+                          : (CATEGORY_LABELS[t.cat] ?? t.cat).toUpperCase()}{" "}
+                        {t.grade}
+                        {t.roll === "cut" ? " · CUT ROLL" : ""}
+                      </th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ))}
-        </div>
-
-        {others.length > 0 && (
-          <table className="mt-5 w-full border-collapse tabular-nums text-xs">
-            <tbody>
-              {others.map((p) => (
-                <tr key={p.id}>
-                  <td className="border border-foreground/40 px-2 py-1 font-medium uppercase">
-                    {brand?.name} {p.name}
-                  </td>
-                  <td className="w-32 border border-foreground/40 px-2 text-right font-semibold">
-                    ₹{fmtNum(price(p))} / {UNIT_LABELS[p.unit as Unit]}
-                  </td>
-                </tr>
+                    <tr>
+                      <th className="border border-foreground/40 px-1 py-1">SIZE</th>
+                      <th className="border border-foreground/40 px-1">
+                        {t.roll === "cut" ? "INCH" : "LENGTH"}
+                      </th>
+                      {t.pns.map((pn) => (
+                        <th key={pn} className="border border-foreground/40 px-1">
+                          {pn}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {t.sizes.map((size) => {
+                      const any = t.rows.find((p) => p.size_mm === size);
+                      return (
+                        <tr key={size}>
+                          <td className="border border-foreground/40 px-1 py-0.5">
+                            {categoryDefaults(t.cat).weightMethod === "matrix"
+                              ? `DN ${size}`
+                              : `${size}MM${any?.inch ? ` (${any.inch})` : ""}`}
+                          </td>
+                          <td className="border border-foreground/40 px-1 text-center">
+                            {t.roll === "cut"
+                              ? (any?.inch ?? "")
+                              : any?.roll_lengths
+                                ? `${any.roll_lengths} m`
+                                : ""}
+                          </td>
+                          {t.pns.map((pn) => {
+                            const p = t.rows.find((x) => x.size_mm === size && x.pn === pn);
+                            return (
+                              <td key={pn} className="border border-foreground/40 px-1 text-right">
+                                {p ? fmtNum(price(p)) : "–"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               ))}
-            </tbody>
-          </table>
-        )}
+            </div>
+
+            {g.others.length > 0 && (
+              <table className="mt-5 w-full border-collapse tabular-nums text-xs">
+                <tbody>
+                  {g.others.map((p) => (
+                    <tr key={p.id}>
+                      <td className="border border-foreground/40 px-2 py-1 font-medium uppercase">
+                        {brand?.name} {p.name}
+                        {p.grade &&
+                        categoryDefaults(p.category).grades.includes(p.grade) &&
+                        !p.name.toUpperCase().includes(p.grade)
+                          ? ` · ${p.grade}`
+                          : ""}
+                      </td>
+                      <td className="w-32 border border-foreground/40 px-2 text-right font-semibold">
+                        ₹{fmtNum(price(p))} / {UNIT_LABELS[p.unit as Unit]}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        ))}
 
         <ol className="mt-4 list-[lower-alpha] space-y-0.5 pl-5 text-xs uppercase">
           <li>Price: ex-factory</li>

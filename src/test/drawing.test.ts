@@ -58,3 +58,32 @@ describe("drawing per subcategory", () => {
     expect(dwcSpec({ category: "pipe", description: "HDPE 110 mm" })).toBeNull();
   });
 });
+
+describe("catalog sections", () => {
+  it("graded subcategories group by subcategory and grade", async () => {
+    const { sectionOf } = await import("@/lib/catalog");
+    registerCategories([
+      { ...cat("pipe", "pipe"), label: "HDPE Pipe" },
+      { ...cat("fitting", "fitting", ""), label: "Fitting" },
+    ]);
+    const p = { name: "x", roll: null, size_mm: 63, pn: "PN 6", inch: null };
+    expect(sectionOf({ ...p, category: "pipe", grade: "PE80" })).toBe("HDPE Pipe PE80");
+    expect(sectionOf({ ...p, category: "fitting", grade: "Electrofusion" })).toBe(
+      "Fitting · Electrofusion",
+    );
+    expect(sectionOf({ ...p, category: "pipe", grade: null })).toBe("HDPE Pipe");
+  });
+});
+
+describe("quote title", () => {
+  it("adds the grade of a graded subcategory when the name lacks it", async () => {
+    const { quoteTitle } = await import("@/lib/catalog");
+    registerCategories([{ ...cat("sprinkler", "pipe", "PE63,PE80"), label: "Sprinkler" }]);
+    expect(
+      quoteTitle({ category: "sprinkler", name: "75 mm × 6 m", pn: null, grade: "PE80" }),
+    ).toBe("Sprinkler Pipe 75 mm × 6 m PE80");
+    expect(
+      quoteTitle({ category: "sprinkler", name: "Sprinkler PE63 75 mm", pn: null, grade: "PE63" }),
+    ).toBe("Sprinkler PE63 75 mm");
+  });
+});

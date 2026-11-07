@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { CategoryChips } from "@/components/category-chips";
 import { fixedPrice, groupIdFor, isPieceGroup, priceMethodOf } from "@/lib/pricing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -2090,15 +2091,7 @@ function CatalogPanel({
 
   return (
     <Card title="Catalog · click to add">
-      <Chips<Category>
-        label="Category"
-        value={cat}
-        onChange={setCat}
-        options={(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
-          value: c,
-          label: CATEGORY_LABELS[c]!,
-        }))}
-      />
+      <CategoryChips value={cat} onChange={setCat} />
       {cat === "pipe" ? (
         <>
           <Chips
@@ -2522,17 +2515,10 @@ function AddItemSheet({
   const body = (
     <>
       <div className={inline ? "space-y-4" : "space-y-4 overflow-y-auto px-4 pb-2"}>
-        <Chips<Category | "custom">
-          label="Category"
+        <CategoryChips<"custom">
           value={cat}
           onChange={setCat}
-          options={[
-            ...(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
-              value: c,
-              label: CATEGORY_LABELS[c]!,
-            })),
-            { value: "custom" as const, label: "Custom" },
-          ]}
+          extra={[{ value: "custom", label: "Custom" }]}
         />
 
         {cat === "pipe" && (
