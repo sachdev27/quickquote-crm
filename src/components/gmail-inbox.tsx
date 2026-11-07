@@ -26,7 +26,7 @@ export function GmailInbox({ onExtracted }: { onExtracted: (r: GmailResult) => v
   });
   const [q, setQ] = useState("");
   const [term, setTerm] = useState("");
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useState(true);
   const connected = !!status.data?.email;
 
   const list = useQuery({
