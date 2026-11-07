@@ -63,6 +63,8 @@ export function registerCategories(
     };
   }
 }
+// true once the categories table has been loaded and this id is in it
+export const isRegisteredCategory = (c: string) => c in CATEGORY_DEFAULTS;
 export const categoryDefaults = (c: string): CategoryInfo =>
   CATEGORY_DEFAULTS[c] ?? {
     unit: "pc",

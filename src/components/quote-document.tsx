@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { UNIT_LABELS, computeTotals, fmtNum, inWords, lineWeight, type Line } from "@/lib/quote";
-import { pipeSpec } from "@/lib/pipe-spec";
+import { colourOf, drawingOf, dwcSpec, pipeSpec } from "@/lib/pipe-spec";
+import { DwcSection } from "@/components/dwc-section";
 import { fmtAmt, fmtDate, fullAddress, stateOf, validUntil } from "@/lib/quote-doc";
 import { PipeSection } from "@/components/pipe-section";
 import { FittingDrawing } from "@/components/fitting-drawing";
@@ -85,13 +86,14 @@ export function QuoteDocument({
     .filter(Boolean);
   const t = computeTotals(lines, q.extra_charges, { inclusive: false, igst });
   const specs = lines.map(pipeSpec);
+  const dwc = lines.map(dwcSpec);
   const totalKg = lines.reduce((s, l) => s + (l.weightKg > 0 ? lineWeight(l) : 0), 0);
   const validTill = isInv ? null : validUntil(q.quote_date, termList);
   const placeOfSupply = stateOf(customer?.gstin) ?? stateOf(brand?.gstin);
   const customerState = stateOf(customer?.gstin) ?? customer?.state ?? null;
   const company = brand?.tagline?.replace(/^by\s+/i, "").trim() || "";
   const signFor = company || brand?.name;
-  const hasPipes = specs.some(Boolean);
+  const hasPipes = specs.some(Boolean) || dwc.some(Boolean);
 
   return (
     <A4Frame>
@@ -233,9 +235,11 @@ export function QuoteDocument({
                         <Td>
                           <div className="flex items-center gap-[2.5mm]">
                             {specs[i] ? (
-                              <PipeSection spec={specs[i]!} />
+                              <PipeSection spec={specs[i]!} colour={colourOf(l.description)} />
+                            ) : dwc[i] ? (
+                              <DwcSection dn={dwc[i]!.dn} cls={dwc[i]!.cls} />
                             ) : (
-                              l.category === "fitting" && (
+                              drawingOf(l.category) === "fitting" && (
                                 <FittingDrawing description={l.description} />
                               )
                             )}
