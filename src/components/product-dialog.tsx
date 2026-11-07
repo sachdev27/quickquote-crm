@@ -14,6 +14,7 @@ import {
 } from "@/lib/product-form";
 import { saveProduct } from "@/data/api";
 import { useQueryClient } from "@tanstack/react-query";
+import { groupIdFor } from "@/lib/pricing";
 import { categoryDefaults, type Category, type Rate } from "@/lib/quote";
 
 export function ProductDialog({
@@ -54,7 +55,11 @@ export function ProductDialog({
       } else {
         setF({
           category: initialCategory,
-          rate_group_id: categoryDefaults(initialCategory).group ?? groups[0]?.id ?? "",
+          grade: categoryDefaults(initialCategory).grades[0] ?? null,
+          rate_group_id: groupIdFor(
+            initialCategory,
+            categoryDefaults(initialCategory).grades[0] ?? null,
+          ),
           name: "",
           unit: categoryDefaults(initialCategory).unit,
           weight: "",
@@ -97,7 +102,6 @@ export function ProductDialog({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!f?.name?.trim()) return void toast.error("Product name is required");
-    if (!f.rate_group_id) return void toast.error("Pick a rate group");
     setSaving(true);
     try {
       const payload = productPayload(f, true);

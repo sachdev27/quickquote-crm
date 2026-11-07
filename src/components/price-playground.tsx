@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { rateKgFor } from "@/lib/pricing";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowRight,
@@ -26,13 +27,11 @@ import {
   fmtMoney,
   fmtNum,
   inWords,
-  rateKgFor,
   withBrandRaw,
   type Brand,
   type Category,
   type Rate,
   type Unit,
-  SPRINKLER_GROUP,
 } from "@/lib/quote";
 import { isSpec } from "@/lib/is4984";
 import { productQueryFilter } from "@/lib/product-search";

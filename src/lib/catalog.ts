@@ -1,4 +1,4 @@
-import { CATEGORY_LABELS, type Category } from "./quote";
+import { CATEGORY_LABELS, categoryDefaults, type Category } from "./quote";
 
 export const LAST_BRAND = "tarko.lastBrand";
 export const LAST_PRESET = "tarko.lastPreset";
@@ -15,9 +15,14 @@ type P = {
 
 export function sectionOf(p: P) {
   // Fittings are grouped by family, which is kept in the grade column (Electrofusion, Spigot moulded, ...).
-  if (p.category === "fitting" && p.grade) return `Fitting · ${p.grade}`;
-  if (p.category !== "pipe") return CATEGORY_LABELS[p.category] ?? p.category;
-  return `HDPE ${p.grade ?? ""} pipe`;
+  const label = CATEGORY_LABELS[p.category] ?? p.category;
+  const d = categoryDefaults(p.category);
+  // graded subcategories: "HDPE Pipe PE80", "PLB Duct Pipe PE63"
+  if (p.grade && d.grades.includes(p.grade)) return `${label} ${p.grade}`;
+  // ungraded ones keep the grade column for a family (fittings: Electrofusion, Spigot moulded, ...)
+  if (p.grade && !d.grades.length && (d.drawing === "fitting" || p.category === "fitting"))
+    return `${label} · ${p.grade}`;
+  return label;
 }
 
 export function shortName(p: P) {
@@ -96,6 +101,10 @@ export const quoteTitle = (
     (p.category === "pipe" || p.category === "sprinkler") && brand && !has(brand) ? brand : "",
     p.category === "sprinkler" && !has("sprinkler") ? "Sprinkler Pipe" : "",
     p.name,
+    // graded subcategories (sprinkler PE 63 / PE 80 twins) print their grade
+    p.grade && categoryDefaults(p.category).grades.includes(p.grade) && !has(p.grade)
+      ? p.grade
+      : "",
     pn && !has(pn) ? pn : "",
     specs ? `(${specs})` : "",
   ]

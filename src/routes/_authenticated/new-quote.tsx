@@ -1,4 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { CategoryChips } from "@/components/category-chips";
+import { fixedPrice, groupIdFor, isPieceGroup, priceMethodOf } from "@/lib/pricing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Copy, MessageCircle, Pencil, Plus, Trash2, X } from "lucide-react";
@@ -47,7 +49,6 @@ import {
   lineGross,
   lineWeight,
   ratePerKg,
-  SPRINKLER_GROUP,
   sprinklerRateKg,
   withBrandRaw,
   type Category,
@@ -102,7 +103,7 @@ const formToRate = (f: RateForm): Rate => ({
 const formRate = (f: RateForm | undefined, nonIsi = false, group = "", weightKg = 0) =>
   !f
     ? 0
-    : group === SPRINKLER_GROUP
+    : isPieceGroup(group)
       ? sprinklerRateKg(formToRate(f), weightKg, nonIsi)
       : ratePerKg(formToRate(f), nonIsi);
 const toForm = (c: Rate): RateForm => ({
@@ -341,8 +342,9 @@ function NewQuote() {
     if (len > 0) patch(l.key, { qty: +(rolls * len).toFixed(3) });
   };
   const usedGroups = uniq(lines.map((l) => l.rateGroupId).filter(Boolean));
+  // ₹/kg cards only: fixed-price groups have no per-kg rate to tweak on a quote
   const shownGroups = (pricing.data?.groups ?? []).filter(
-    (g) => !usedGroups.length || usedGroups.includes(g.id),
+    (g) => priceMethodOf(g.id) !== "fixed" && (!usedGroups.length || usedGroups.includes(g.id)),
   );
 
   const [autoPdf, setAutoPdf] = useState(0); // >0: lines expected before the AI draft saves itself and opens the PDF
@@ -549,7 +551,11 @@ function NewQuote() {
   const createNewProduct = (cat?: Category) => {
     setEditingProduct({
       category: cat ?? "fitting",
-      rate_group_id: pricing.data?.groups[0]?.id ?? "",
+      grade: categoryDefaults(cat ?? "fitting").grades[0] ?? null,
+      rate_group_id: groupIdFor(
+        cat ?? "fitting",
+        categoryDefaults(cat ?? "fitting").grades[0] ?? null,
+      ),
       name: "",
       unit: cat === "pipe" ? "m" : "pc",
       weight: "",
@@ -559,6 +565,17 @@ function NewQuote() {
     setProductDialogOpen(true);
   };
   // Desktop catalog click: add the product, or bump its qty by one roll / step if it's already on the quote.
+  // Price of a catalog product on a new line. Fixed-price items (base ₹ + preset margin) become a priced
+  // line without a rate group, so later rate edits never touch them; the rest are weight × ₹/kg.
+  const catalogPrice = (p: Product, lb: string) => {
+    if (priceMethodOf(p.rate_group_id) === "fixed" && p.base_price != null) {
+      const r = rateRow(groupPreset[p.rate_group_id] ?? presetId, p.rate_group_id);
+      const price = r ? fixedPrice(r, p.base_price) : p.base_price;
+      return { rateGroupId: null, rateKg: 0, unitPrice: price };
+    }
+    const rk = rateOf(p.rate_group_id, p.weight_kg, lb);
+    return { rateGroupId: p.rate_group_id, rateKg: rk, unitPrice: p.weight_kg * rk };
+  };
   const addFromCatalog = (p: Product, bid?: string) => {
     const step =
       (p.roll_lengths ?? "").split("/").map(Number).find(Boolean) ?? (p.unit === "m" ? 100 : 10);
@@ -572,15 +589,13 @@ function NewQuote() {
       {
         productId: p.id,
         brandId: lb,
-        rateGroupId: p.rate_group_id,
         category: p.category as Category,
         description: quoteTitle(p),
         hsn: p.hsn,
         unit: p.unit as Unit,
         qty: step,
         weightKg: p.weight_kg,
-        rateKg: rateOf(p.rate_group_id, p.weight_kg, lb),
-        unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, lb),
+        ...catalogPrice(p, lb),
         gstRate: p.gst_rate,
       },
       true,
@@ -737,15 +752,13 @@ function NewQuote() {
       {
         productId: p.id,
         brandId: lb,
-        rateGroupId: p.rate_group_id,
         category: p.category as Category,
         description: over?.description || quoteTitle(p),
         hsn: p.hsn,
         unit: p.unit as Unit,
         qty,
         weightKg: p.weight_kg,
-        rateKg: rateOf(p.rate_group_id, p.weight_kg, lb),
-        unitPrice: p.weight_kg * rateOf(p.rate_group_id, p.weight_kg, lb),
+        ...catalogPrice(p, lb),
         gstRate: over?.gstRate ?? p.gst_rate,
       },
       true,
@@ -1689,7 +1702,7 @@ function NewQuote() {
                               )}
                             </span>
                             <span className="flex items-center gap-2 text-lg font-bold tabular-nums">
-                              {c.id === SPRINKLER_GROUP ? (
+                              {isPieceGroup(c.id) ? (
                                 <>
                                   +{fmtMoney(num(f?.production ?? "") + num(f?.margin ?? ""))}
                                   <span className="text-xs font-medium text-muted-foreground">
@@ -1723,7 +1736,7 @@ function NewQuote() {
                                       label: p.name,
                                       sub: !r
                                         ? "not set"
-                                        : c.id === SPRINKLER_GROUP
+                                        : isPieceGroup(c.id)
                                           ? `+₹${fmtNum(r.production_kg + r.transport_kg + r.margin)}/pc`
                                           : `₹${fmtNum(ratePerKg(withBrandRaw(r, brandRawFor(c.id)), nonIsi))}/kg`,
                                     };
@@ -1750,9 +1763,7 @@ function NewQuote() {
                                     className={inputCls}
                                   />
                                 </Field>
-                                <Field
-                                  label={`Production ₹/${c.id === SPRINKLER_GROUP ? "pc" : "kg"}`}
-                                >
+                                <Field label={`Production ₹/${isPieceGroup(c.id) ? "pc" : "kg"}`}>
                                   <input
                                     inputMode="decimal"
                                     value={f.production}
@@ -1762,9 +1773,7 @@ function NewQuote() {
                                   />
                                 </Field>
                                 <Field
-                                  label={
-                                    c.id === SPRINKLER_GROUP ? "Coupler ₹/pc" : "Transport ₹/kg"
-                                  }
+                                  label={isPieceGroup(c.id) ? "Coupler ₹/pc" : "Transport ₹/kg"}
                                 >
                                   <input
                                     inputMode="decimal"
@@ -1776,7 +1785,7 @@ function NewQuote() {
                                 </Field>
                                 <Field
                                   label={
-                                    c.id === SPRINKLER_GROUP
+                                    isPieceGroup(c.id)
                                       ? "Margin ₹/pc"
                                       : `Margin ${f.pct ? "%" : "₹/kg"}`
                                   }
@@ -1790,7 +1799,7 @@ function NewQuote() {
                                   />
                                 </Field>
                               </div>
-                              {c.id === SPRINKLER_GROUP ? (
+                              {isPieceGroup(c.id) ? (
                                 <p className="text-xs text-muted-foreground">
                                   Price per piece = raw × piece weight + production + coupler +
                                   margin.
@@ -1969,9 +1978,9 @@ function NewQuote() {
         brands={brands.data ?? []}
         basis={presetName(presetId)}
         rateOf={rateOf}
-        sprinklerRate={(bid) => {
-          const r = rateRow(groupPreset[SPRINKLER_GROUP] ?? presetId, SPRINKLER_GROUP);
-          const b = brandRawFor(SPRINKLER_GROUP, bid ?? brandId);
+        sprinklerRate={(bid, group = "sprinkler:PE63") => {
+          const r = rateRow(groupPreset[group] ?? presetId, group);
+          const b = brandRawFor(group, bid ?? brandId);
           return r && withBrandRaw(r, b);
         }}
         onSaved={(saved, id) => {
@@ -2082,15 +2091,7 @@ function CatalogPanel({
 
   return (
     <Card title="Catalog · click to add">
-      <Chips<Category>
-        label="Category"
-        value={cat}
-        onChange={setCat}
-        options={(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
-          value: c,
-          label: CATEGORY_LABELS[c]!,
-        }))}
-      />
+      <CategoryChips value={cat} onChange={setCat} />
       {cat === "pipe" ? (
         <>
           <Chips
@@ -2294,7 +2295,7 @@ function AddItemSheet({
     unit: "pc" as Unit,
     gst: 18,
     weight: "",
-    card: "FITTING",
+    card: "fitting",
     price: "",
     qty: "1",
     save: true,
@@ -2514,17 +2515,10 @@ function AddItemSheet({
   const body = (
     <>
       <div className={inline ? "space-y-4" : "space-y-4 overflow-y-auto px-4 pb-2"}>
-        <Chips<Category | "custom">
-          label="Category"
+        <CategoryChips<"custom">
           value={cat}
           onChange={setCat}
-          options={[
-            ...(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({
-              value: c,
-              label: CATEGORY_LABELS[c]!,
-            })),
-            { value: "custom" as const, label: "Custom" },
-          ]}
+          extra={[{ value: "custom", label: "Custom" }]}
         />
 
         {cat === "pipe" && (
@@ -2750,7 +2744,7 @@ function AddItemSheet({
                   ...cu,
                   cat: c,
                   gst: categoryDefaults(c).gst,
-                  card: c === "sprinkler" ? "SPRINKLER" : cu.card,
+                  card: groupIdFor(c, categoryDefaults(c).grades[0] ?? null),
                 })
               }
               options={(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => ({

@@ -100,6 +100,7 @@ export const products = sqliteTable("products", {
   brand_id: text("brand_id"), // sprinkler pipe only: its weight is that brand's
   specs: text("specs"), // JSON {field: value} for the category's custom specification fields
   length_m: real("length_m"), // sprinkler pipe only: 6 or 12 m
+  base_price: real("base_price"), // fixed-price subcategories: ₹ before the preset margin
   sort: integer("sort").notNull().default(0),
   active: integer("active").notNull().default(1),
 });
@@ -273,6 +274,35 @@ export const categories = sqliteTable("categories", {
   gst_rate: real("gst_rate").notNull().default(18),
   rate_group_id: text("rate_group_id"),
   spec_fields: text("spec_fields"),
+  sort: integer("sort").notNull().default(0),
+  parent_id: text("parent_id"), // product_groups.id
+  grades: text("grades").notNull().default(""), // comma list: PE63,PE80,PE100; empty = ungraded
+  price_method: text("price_method").notNull().default("weight_rate"), // weight_rate | sprinkler_piece | fixed
+  weight_method: text("weight_method").notNull().default("none"), // is4984 | matrix | brand | none
+  drawing: text("drawing").notNull().default("none"), // pipe | sprinkler | fitting | dwc | none
+  class_label: text("class_label").notNull().default(""), // PN, SN, ...
+});
+
+// Top of the catalog tree: HDPE, Fittings, Irrigation accessories, PVC / other plastics.
+export const product_groups = sqliteTable("product_groups", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  sort: integer("sort").notNull().default(0),
+});
+
+// Editable kg/m per size x class for subcategories whose weight_method is "matrix" (DWC, ...).
+// grade null = the same weight for every grade of the subcategory.
+export const weight_matrix = sqliteTable("weight_matrix", {
+  id: text("id").primaryKey(),
+  category_id: text("category_id").notNull(),
+  grade: text("grade"),
+  size_mm: real("size_mm").notNull(),
+  size_label: text("size_label").notNull(),
+  class: text("class").notNull(),
+  kg_per_m: real("kg_per_m").notNull().default(0),
+  od_mm: real("od_mm"),
+  id_mm: real("id_mm"),
+  wall_mm: real("wall_mm"),
   sort: integer("sort").notNull().default(0),
 });
 

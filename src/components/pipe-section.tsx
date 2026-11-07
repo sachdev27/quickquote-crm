@@ -4,7 +4,24 @@ import { fmtNum } from "@/lib/quote";
 // Pipe cross-section drawn as inline SVG (sharp at any zoom or print size), with the three dimensions
 // written on it: OD (dimension line over the top), ID (line across the bore) and thickness (leader into
 // the wall). Ring size follows OD on a log scale; the wall is exaggerated so thickness is visible.
-export function PipeSection({ spec }: { spec: PipeSpec }) {
+// Wall fill for a colour spec (PLB ducts come in colours); unknown names keep the default dark wall.
+const COLOURS: Record<string, string> = {
+  black: "#1e293b",
+  orange: "#f97316",
+  yellow: "#eab308",
+  red: "#dc2626",
+  blue: "#2563eb",
+  green: "#16a34a",
+  grey: "#6b7280",
+  gray: "#6b7280",
+  white: "#e5e7eb",
+  brown: "#92400e",
+};
+export const colourHex = (name: string | null | undefined): string | null =>
+  COLOURS[(name ?? "").trim().toLowerCase()] ?? null;
+
+export function PipeSection({ spec, colour }: { spec: PipeSpec; colour?: string | null }) {
+  const wallFill = colourHex(colour) ?? "#1e293b";
   const t = Math.min(1, Math.max(0, Math.log(spec.od / 16) / Math.log(10)));
   const R = 13 + 7 * t;
   const cx = 24;
@@ -22,7 +39,7 @@ export function PipeSection({ spec }: { spec: PipeSpec }) {
   const wallText = spec.wall
     ? `${fmtNum(spec.wall, 1)}${spec.wallMax ? `–${fmtNum(spec.wallMax, 1)}` : ""} mm`
     : "";
-  const label = `Pipe cross-section: OD ${fmtNum(spec.od)} mm${hasWall ? `, ID ${fmtNum(spec.id!, 1)} mm, thickness ${wallText}` : ""}`;
+  const label = `Pipe cross-section: OD ${fmtNum(spec.od)} mm${hasWall ? `, ID ${fmtNum(spec.id!, 1)} mm, thickness ${wallText}` : ""}${colour ? `, ${colour}` : ""}`;
   const line = "var(--qd-accent, #0b4f7c)";
   const ink = "var(--qd-ink, #1e293b)";
   const muted = "var(--qd-muted, #64748b)";
@@ -36,7 +53,13 @@ export function PipeSection({ spec }: { spec: PipeSpec }) {
     >
       {/* bore + wall */}
       <circle cx={cx} cy={cy} r={r} fill="#f1f5f9" />
-      <path d={ring} fill="#1e293b" fillRule="evenodd" />
+      <path
+        d={ring}
+        fill={wallFill}
+        fillRule="evenodd"
+        stroke={wallFill === "#e5e7eb" ? "#94a3b8" : "none"}
+        strokeWidth="0.5"
+      />
 
       {/* OD: dimension line over the top, extended to its label */}
       <g stroke={line} strokeWidth="0.9" fill="none">

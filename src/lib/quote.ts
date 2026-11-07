@@ -8,10 +8,32 @@ export const CATEGORY_LABELS: Record<string, string> = {
   sprinkler: "Sprinkler",
   fitting: "Fitting",
 };
-const CATEGORY_DEFAULTS: Record<
-  string,
-  { unit: Unit; gst: number; group: string | null; specs: string[] }
-> = {};
+// Parent groups of the catalog tree (HDPE, Fittings, ...), filled alongside the categories.
+export const PRODUCT_GROUPS: { id: string; label: string }[] = [];
+export function registerProductGroups(rows: { id: string; label: string }[]) {
+  PRODUCT_GROUPS.splice(0, PRODUCT_GROUPS.length, ...rows.map(({ id, label }) => ({ id, label })));
+}
+export type PriceMethod = "weight_rate" | "sprinkler_piece" | "fixed";
+export type WeightMethod = "is4984" | "matrix" | "brand" | "none";
+export type Drawing = "pipe" | "sprinkler" | "fitting" | "dwc" | "none";
+export interface CategoryInfo {
+  unit: Unit;
+  gst: number;
+  group: string | null;
+  specs: string[];
+  parent: string | null;
+  grades: string[];
+  priceMethod: PriceMethod;
+  weightMethod: WeightMethod;
+  drawing: Drawing;
+  classLabel: string;
+}
+const CATEGORY_DEFAULTS: Record<string, CategoryInfo> = {};
+const csv = (s: string | null | undefined) =>
+  (s ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
 export function registerCategories(
   rows: {
     id: string;
@@ -20,6 +42,12 @@ export function registerCategories(
     gst_rate: number;
     rate_group_id: string | null;
     spec_fields: string | null;
+    parent_id?: string | null;
+    grades?: string | null;
+    price_method?: string | null;
+    weight_method?: string | null;
+    drawing?: string | null;
+    class_label?: string | null;
   }[],
 ) {
   for (const k of Object.keys(CATEGORY_LABELS)) delete CATEGORY_LABELS[k];
@@ -30,15 +58,31 @@ export function registerCategories(
       unit: r.unit as Unit,
       gst: r.gst_rate,
       group: r.rate_group_id,
-      specs: (r.spec_fields ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
+      specs: csv(r.spec_fields),
+      parent: r.parent_id ?? null,
+      grades: csv(r.grades),
+      priceMethod: (r.price_method ?? "weight_rate") as PriceMethod,
+      weightMethod: (r.weight_method ?? "none") as WeightMethod,
+      drawing: (r.drawing ?? "none") as Drawing,
+      classLabel: r.class_label ?? "",
     };
   }
 }
-export const categoryDefaults = (c: string) =>
-  CATEGORY_DEFAULTS[c] ?? { unit: "pc" as Unit, gst: 18, group: null, specs: [] as string[] };
+// true once the categories table has been loaded and this id is in it
+export const isRegisteredCategory = (c: string) => c in CATEGORY_DEFAULTS;
+export const categoryDefaults = (c: string): CategoryInfo =>
+  CATEGORY_DEFAULTS[c] ?? {
+    unit: "pc",
+    gst: 18,
+    group: null,
+    specs: [],
+    parent: null,
+    grades: [],
+    priceMethod: "weight_rate",
+    weightMethod: "none",
+    drawing: "none",
+    classLabel: "",
+  };
 export const categoryRank = (c: string) => {
   const i = Object.keys(CATEGORY_LABELS).indexOf(c);
   return i < 0 ? 99 : i;
@@ -102,19 +146,14 @@ export function ratePerKg(r: Rate, nonIsi = false): number {
 }
 
 // Sprinkler pipe is priced per piece: raw ₹/kg × the brand's piece weight + production ₹ + coupler ₹ + margin ₹
-// (all flat per piece, stored in production_kg, transport_kg and margin of the SPRINKLER rate; the coupler is
+// (all flat per piece, stored in production_kg, transport_kg and margin of the sprinkler rate; the coupler is
 // bought in and fitted in-house). Returned as the equivalent ₹/kg so a line stays weight × rate.
-export const SPRINKLER_GROUP = "SPRINKLER";
 export function sprinklerPrice(r: Rate, weightKg: number, nonIsi = false): number {
   const raw = nonIsi && r.raw_kg_non_isi != null ? r.raw_kg_non_isi : r.raw_kg;
   return raw * weightKg + r.production_kg + r.transport_kg + r.margin;
 }
 export const sprinklerRateKg = (r: Rate, weightKg: number, nonIsi = false) =>
   weightKg > 0 ? sprinklerPrice(r, weightKg, nonIsi) / weightKg : 0;
-
-// ₹/kg a product of this rate group sells at, given its weight.
-export const rateKgFor = (r: Rate, group: string, weightKg: number, nonIsi = false) =>
-  group === SPRINKLER_GROUP ? sprinklerRateKg(r, weightKg, nonIsi) : ratePerKg(r, nonIsi);
 
 // One quote line, ex-GST. unitPrice = weightKg × rateKg (per metre / piece); custom lines may type unitPrice directly.
 export interface Line {

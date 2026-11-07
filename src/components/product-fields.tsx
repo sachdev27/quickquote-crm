@@ -14,6 +14,7 @@ import {
   type Rate,
   type Unit,
 } from "@/lib/quote";
+import { groupIdFor, isPieceGroup } from "@/lib/pricing";
 import { pipeKgPerM, pnNumber, sdrFor } from "@/lib/weights";
 
 const n = (s: string) => Number(s) || 0;
@@ -35,7 +36,7 @@ export function ProductFields({
   brands: { id: string; name: string }[];
   basis: string;
   rateOf: (group: string, weightKg?: number, brandId?: string | null) => number;
-  sprinklerRate: (brandId?: string | null) => Rate | undefined;
+  sprinklerRate: (brandId?: string | null, group?: string) => Rate | undefined;
 }) {
   const brandName = (id?: string | null) => brands.find((b) => b.id === id)?.name ?? "";
   const calcWeight = () => {
@@ -45,6 +46,8 @@ export function ProductFields({
     setProd({ ...prod, weight: pipeKgPerM(prod.size_mm, sdr).toFixed(3) });
     toast.success(`IS 4984: SDR ${sdr}`);
   };
+  const grades = categoryDefaults(prod.category ?? "").grades;
+  const fixed = categoryDefaults(prod.category ?? "").priceMethod === "fixed";
   return (
     <>
       <Field label="Category">
@@ -52,12 +55,20 @@ export function ProductFields({
           value={prod.category ?? "fitting"}
           onChange={(e) => {
             const c = e.target.value as Category;
+            const d = categoryDefaults(c);
+            // keep the grade when the new subcategory has it, else start on its first grade
+            const grade = d.grades.length
+              ? d.grades.includes(prod.grade ?? "")
+                ? prod.grade!
+                : d.grades[0]!
+              : (prod.grade ?? null);
             setProd({
               ...prod,
               category: c,
-              gst_rate: categoryDefaults(c).gst,
-              unit: categoryDefaults(c).unit,
-              ...(categoryDefaults(c).group ? { rate_group_id: categoryDefaults(c).group! } : {}),
+              grade,
+              gst_rate: d.gst,
+              unit: d.unit,
+              rate_group_id: groupIdFor(c, grade),
             });
           }}
           className={inputCls}
@@ -78,18 +89,13 @@ export function ProductFields({
           className={inputCls}
         />
       </Field>
-      <Field label="Rate group">
-        <Chips
-          label="Rate group"
-          value={prod.rate_group_id ?? ""}
-          onChange={(id) => setProd({ ...prod, rate_group_id: id })}
-          options={groups.map((g) => ({
-            value: g.id,
-            label: g.name,
-            sub: `${fmtMoney(rateOf(g.id))}/kg`,
-          }))}
-        />
-      </Field>
+      <p className="text-xs text-muted-foreground">
+        Priced from{" "}
+        <span className="font-medium text-foreground">
+          {groups.find((g) => g.id === prod.rate_group_id)?.name ?? prod.rate_group_id}
+        </span>{" "}
+        rates (follows category and grade).
+      </p>
       {prod.category === "sprinkler" && (
         <Field label="Brand (weights and raw rate belong to a brand)">
           <Chips
@@ -141,15 +147,34 @@ export function ProductFields({
             className={inputCls}
           />
         </Field>
-        <Field label="Grade">
-          <input
-            value={prod.grade ?? ""}
-            onChange={(e) => setProd({ ...prod, grade: e.target.value.toUpperCase() })}
-            placeholder="PE63"
-            className={inputCls}
-          />
+        <Field label={grades.length ? "Grade" : prod.category === "fitting" ? "Family" : "Grade"}>
+          {grades.length ? (
+            <select
+              value={prod.grade ?? ""}
+              onChange={(e) =>
+                setProd({
+                  ...prod,
+                  grade: e.target.value,
+                  rate_group_id: groupIdFor(prod.category ?? "", e.target.value),
+                })
+              }
+              className={inputCls}
+            >
+              {grades.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={prod.grade ?? ""}
+              onChange={(e) => setProd({ ...prod, grade: e.target.value })}
+              className={inputCls}
+            />
+          )}
         </Field>
-        <Field label="Pressure class">
+        <Field label={categoryDefaults(prod.category ?? "").classLabel || "Pressure class"}>
           <input
             value={prod.pn ?? ""}
             onChange={(e) => setProd({ ...prod, pn: e.target.value })}
@@ -200,26 +225,45 @@ export function ProductFields({
           ]}
         />
       </Field>
-      <Field label={`Weight (kg per ${UNIT_LABELS[(prod.unit ?? "pc") as Unit]})`}>
-        <div className="flex gap-2">
+      {fixed && (
+        <Field
+          label={`Base price (₹ per ${UNIT_LABELS[(prod.unit ?? "pc") as Unit]}, before preset margin)`}
+        >
           <input
             inputMode="decimal"
-            value={prod.weight}
-            onChange={(e) => setProd({ ...prod, weight: e.target.value })}
+            value={prod.base_price ?? ""}
+            onChange={(e) =>
+              setProd({
+                ...prod,
+                base_price: e.target.value === "" ? null : Number(e.target.value) || 0,
+              })
+            }
             className={inputCls}
           />
-          {prod.category === "pipe" && (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-12 shrink-0 rounded-xl"
-              onClick={calcWeight}
-            >
-              <Calculator className="mr-1 h-4 w-4" /> IS 4984
-            </Button>
-          )}
-        </div>
-      </Field>
+        </Field>
+      )}
+      {!fixed && (
+        <Field label={`Weight (kg per ${UNIT_LABELS[(prod.unit ?? "pc") as Unit]})`}>
+          <div className="flex gap-2">
+            <input
+              inputMode="decimal"
+              value={prod.weight}
+              onChange={(e) => setProd({ ...prod, weight: e.target.value })}
+              className={inputCls}
+            />
+            {categoryDefaults(prod.category ?? "").weightMethod === "is4984" && (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 shrink-0 rounded-xl"
+                onClick={calcWeight}
+              >
+                <Calculator className="mr-1 h-4 w-4" /> IS 4984
+              </Button>
+            )}
+          </div>
+        </Field>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <Field label="GST">
           <select
@@ -257,10 +301,10 @@ export function ProductFields({
           </span>
         </span>
       </div>
-      {prod.rate_group_id === "SPRINKLER" &&
+      {isPieceGroup(prod.rate_group_id ?? "") &&
         (() => {
           // sprinkler pipe: ₹ per piece = raw ₹/kg × piece weight + production + coupler + margin (flat per piece)
-          const r = sprinklerRate(prod.brand_id);
+          const r = sprinklerRate(prod.brand_id, prod.rate_group_id ?? undefined);
           if (!r) return null;
           const raw = r.raw_kg;
           const w = n(prod.weight);

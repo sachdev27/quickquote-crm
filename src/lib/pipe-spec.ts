@@ -1,4 +1,4 @@
-import type { Line } from "./quote";
+import { categoryDefaults, isRegisteredCategory, type Drawing, type Line } from "./quote";
 import { isSpec } from "./is4984";
 import { PE_DENSITY, pnNumber, sdrFor, wallFor } from "./weights";
 
@@ -22,10 +22,40 @@ export function wallFromWeight(od: number, kgPerM: number): number | null {
 // Reads OD / grade / PN from the printed description (works for catalog and custom lines alike).
 // Grade + PN give the SDR and so the IS 4984 min–max wall; the quoted weight only stands in for the wall
 // on custom lines that name no grade or PN.
+// Drawing a line gets on the quote: the subcategory's setting, else the built-in one for the original categories.
+const BUILT_IN: Record<string, Drawing> = {
+  pipe: "pipe",
+  sprinkler: "pipe",
+  fitting: "fitting",
+  dwc: "dwc",
+};
+export const drawingOf = (category: string): Drawing =>
+  isRegisteredCategory(category)
+    ? categoryDefaults(category).drawing
+    : (BUILT_IN[category] ?? "none");
+
+// "(Colour: Orange, …)" as quoteTitle prints a product's custom specifications.
+export const colourOf = (description: string): string | null =>
+  /\(\s*(?:[^()]*,\s*)?Colou?r:\s*([^,)]+)/i.exec(description)?.[1]?.trim() ?? null;
+
+// DWC: nominal inside diameter (DN) and ring stiffness class from the printed description.
+export function dwcSpec(
+  l: Pick<Line, "category" | "description">,
+): { dn: number; cls: string | null } | null {
+  if (drawingOf(l.category) !== "dwc") return null;
+  const dn = Number(
+    /\bDN\s*(\d{2,4})/i.exec(l.description)?.[1] ?? /(\d{2,4})\s*mm\b/i.exec(l.description)?.[1],
+  );
+  if (!dn) return null;
+  const sn = /\bSN\s*(\d+)/i.exec(l.description)?.[1];
+  return { dn, cls: sn ? `SN ${sn}` : null };
+}
+
 export function pipeSpec(
   l: Pick<Line, "category" | "description" | "unit" | "weightKg">,
 ): PipeSpec | null {
-  if (l.category !== "pipe" && l.category !== "sprinkler") return null;
+  const d = drawingOf(l.category);
+  if (d !== "pipe" && d !== "sprinkler") return null;
   const od = Number(/(\d{2,4}(?:\.\d+)?)\s*mm\b/i.exec(l.description)?.[1]);
   if (!od) return null;
   const grade = /\bPE\s?(63|80|100)\b/i.exec(l.description)?.[1];
